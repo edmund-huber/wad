@@ -35,6 +35,8 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
+    os.mkdir(os.path.join('.wad', 'commits')) # TODO need to be catching these and doing something reasonable
+    os.mkdir(os.path.join('.wad', 'lists'))
 
 
 def check_is_wad_repository():
