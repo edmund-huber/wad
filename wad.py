@@ -1,4 +1,5 @@
 #!/usr/bin/env python2
+import hashlib
 import inspect
 import os.path
 import re
@@ -28,16 +29,16 @@ def command_help(*args):
 
 
 def goto(reference):
-    commit = look_up_reference(reference)
+    commit = look_up_commit(reference)
     # TODO: the actual reading of commits and changing files
     set_head(reference)
 
 
 class WadObject(object):
 
-    def __init__(self, reference):
-        type(self)._check_reference(reference)
-        self.reference = reference
+    # use abc.abstract?
+    def get_reference(self):
+        raise UnreachableException()
 
     @classmethod
     def _filename(cls, reference):
@@ -53,15 +54,19 @@ class WadObject(object):
         return _object
 
     def store(self):
-        with open(type(self)._filename(self.reference), 'w') as f:
+        reference = self.get_reference()
+        with open(type(self)._filename(reference), 'w') as f:
             self._write_to_file(f)
 
 
 class Tag(WadObject):
 
     def __init__(self, reference, head_commit):
-        super(Tag, self).__init__(reference)
+        self.reference = reference
         self.head_commit = head_commit
+
+    def get_reference(self):
+        return self.reference
 
     @classmethod
     def _check_reference(cls, reference):
@@ -77,7 +82,7 @@ class Tag(WadObject):
         return Tag(reference, head_commit)
 
     def _write_to_file(self, f):
-        f.write(self.head_commit.reference)
+        f.write(self.head_commit.get_reference())
 
 
 def get_head():
@@ -110,7 +115,7 @@ def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argume
     else:
         tag = Tag(name, starting_from_commit)
     tag.store()
-    goto(tag.reference)
+    goto(tag.get_reference())
 
 
 def command_init():
@@ -122,7 +127,7 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    genesis_commit = Commit('C:0', None) # TODO add a 'next_commit_id' -- but not that, because that won't work distributed
+    genesis_commit = Commit(None)
     genesis_commit.store()
     new_tag('T:main', starting_from_commit=genesis_commit)
 
@@ -164,7 +169,9 @@ def command_new_commit(description):
     if description is None:
         raise Exception('"new commit" needs a description') # TODO: UsageException
     head = get_head()
-    commit = Commit('C:1', look_up_reference(head).reference)
+    # pack up all the changes in the commit
+    commit = Commit(look_up_commit(head).get_reference())
+    # do not proceed if nothing to commit
     commit.store()
     if head.startswith('T:'):
         tag = Tag.load(head)
@@ -172,27 +179,33 @@ def command_new_commit(description):
         tag.store()
         goto(head)
     elif head.startswith('C:'):
-        goto(commit.reference)
+        goto(commit.get_reference())
     else:
         raise UnreachableException()
 
 
 class Commit(WadObject):
 
-    def __init__(self, reference, parent_reference):
-        super(Commit, self).__init__(reference)
+    def __init__(self, parent_reference):
         self.parent_reference = parent_reference
+
+    def get_reference(self):
+        _hash = hashlib.sha1()
+        parent_reference = self.parent_reference or ''
+        _hash.update('parent=' + parent_reference)
+        # TODO add other junk, like: contents
+        return 'C:' + _hash.hexdigest()
 
     @classmethod
     def _check_reference(cls, reference):
-        if re.search(r'^C:[0-9]+$', reference) is None:
+        if re.search(r'^C:[0-9a-f]+$', reference) is None:
             raise Exception('"{}" is not a valid commit reference.'.format(reference))
 
     @classmethod
     def _load_from_file(cls, reference, f):
-        (parent_reference,) = f.readlines()
+        parent_reference = f.readline().strip() or None
         # TODO: be lazy - don't read the entire commit contents, yet
-        return Commit(reference, parent_reference)
+        return Commit(parent_reference)
 
     def _write_to_file(self, f):
         if self.parent_reference is None:
@@ -203,12 +216,12 @@ class Commit(WadObject):
     # TODO: .parent()
 
 
-def look_up_reference(reference):
+def look_up_commit(reference):
     if reference.startswith('C:'):
         return Commit.load(reference)
     elif reference.startswith('T:'):
         tag = Tag.load(reference)
-        return Commit.load(tag.head_commit.reference)
+        return Commit.load(tag.head_commit.get_reference())
     else:
         raise UnreachableException() # TODO
 
