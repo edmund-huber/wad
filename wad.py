@@ -112,7 +112,7 @@ def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argume
         raise UsageException('Tag "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
     if starting_from_commit is None:
-        head_commit = get_head()
+        head_commit = look_up_commit(get_head())
         tag = Tag(name, head_commit)
     else:
         tag = Tag(name, starting_from_commit)
@@ -173,10 +173,10 @@ def command_tag():
         )
 
 
-def command_new_tag(description):
-    if description is None:
-        raise UsageException('"new tag" needs a description') # TODO: UsageException
-    print 'new tag: "{}"'.format(description) # TODO
+def command_new_tag(reference): # TODO optional: starting_from
+    if reference is None:
+        raise UsageException('"new tag" needs a reference') # TODO: UsageException
+    new_tag(reference)
 
 
 def command_new_commit(description):
@@ -244,6 +244,7 @@ def look_up_commit(reference):
         return Commit.load(reference)
     elif reference.startswith('T:'):
         tag = Tag.load(reference)
+        assert tag is not None
         return Commit.load(tag.head_commit.get_reference())
     else:
         raise UnreachableException() # TODO
