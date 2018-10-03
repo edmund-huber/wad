@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 import inspect
 import os.path
+import re
 import sys
 
 # TODO: pepwhatever, pyflakes
@@ -26,6 +27,83 @@ def command_help(*args):
         print command_fn.__doc__
 
 
+def goto(reference):
+    commit = look_up_reference(reference)
+
+
+class WadObject(object):
+
+    def __init__(self, reference):
+        type(self)._check_reference(reference)
+        self.reference = reference
+
+    @classmethod
+    def _filename(cls, reference):
+        return os.path.join('.wad', reference)
+
+    @classmethod
+    def load(cls, reference):
+        cls._check_reference(reference)
+        if not os.path.exists(cls._filename(reference)):
+            return None
+        with open(cls._filename(reference)) as f:
+            _object = cls._load_from_file(reference, f)
+        return _object
+
+    def store(self):
+        with open(type(self)._filename(self.reference), 'w') as f:
+            self._write_to_file(f)
+
+
+class Tag(WadObject):
+
+    def __init__(self, reference, head_commit):
+        super(Tag, self).__init__(reference)
+        self.head_commit = head_commit
+
+    @classmethod
+    def _check_reference(cls, reference):
+        if re.search(r'^T:[a-z_]+$', reference) is None:
+            raise Exception('"{}" is not a valid tag reference.'.format(reference))
+
+    @classmethod
+    def _load_from_file(cls, reference, f):
+        (head,) = f.readlines()
+        head_commit = Commit.load(head)
+        if head_commit is None:
+            raise Exception("{}, pointed at by {}, doesn't exist!".format(head, reference))
+        return Tag(reference, head_commit)
+
+    def _write_to_file(self, f):
+        f.write(self.head_commit.reference)
+
+    # TODO: .get_head() -> Commit
+
+
+def get_head():
+    head_fn = os.path.join('.wad', 'head')
+    try:
+        with open(head_fn) as f:
+            (head,) = f.readlines()
+            return head
+    except IOError:
+        raise UsageException('Broken repository - {} does not exist!'.format(head_fn))
+    raise UnreachableException()
+
+
+def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argument
+    if Tag.load(name) is not None:
+        raise UsageException('Tag "{}" already exists.'.format(name))
+    # TODO name must be a-z and underscores
+    if starting_from_commit is None:
+        head_commit = get_head()
+        tag = Tag(name, head_commit)
+    else:
+        tag = Tag(name, starting_from_commit)
+    tag.store()
+    goto(tag.reference)
+
+
 def command_init():
     """wad init
 
@@ -35,8 +113,9 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    os.mkdir(os.path.join('.wad', 'commits')) # TODO need to be catching these and doing something reasonable
-    os.mkdir(os.path.join('.wad', 'lists'))
+    genesis_commit = Commit('C:0') # TODO add a 'next_commit_id' -- but not that, because that won't work distributed
+    genesis_commit.store()
+    new_tag('T:main', starting_from_commit=genesis_commit)
 
 
 def check_is_wad_repository():
@@ -44,15 +123,23 @@ def check_is_wad_repository():
         raise UsageException('Directory {} is not a wad. Try `wad init`.'.format(os.path.abspath('.')))
 
 
-def command_list():
+def command_log():
+    print 'log'
+
+
+def command_diff():
+    print 'log'
+
+
+def command_tag():
     check_is_wad_repository()
-    print 'list'
+    print 'tag'
 
 
-def command_new_list(description):
+def command_new_tag(description):
     if description is None:
-        raise UsageException('"new list" needs a description') # TODO: UsageException
-    print 'new list: "{}"'.format(description)
+        raise UsageException('"new tag" needs a description') # TODO: UsageException
+    print 'new tag: "{}"'.format(description)
 
 
 def command_new_commit(description):
@@ -61,20 +148,40 @@ def command_new_commit(description):
     print 'new commit: "{}"'.format(description)
 
 
+class Commit(WadObject):
+
+    def __init__(self, reference):
+        super(Commit, self).__init__(reference)
+
+    @classmethod
+    def _check_reference(cls, reference):
+        if re.search(r'^C:[0-9]+$', reference) is None:
+            raise Exception('"{}" is not a valid commit reference.'.format(reference))
+
+    @classmethod
+    def _load_from_file(cls, reference, f):
+        return Commit(reference)
+
+    def _write_to_file(self, f):
+        pass
+
+    # TODO: .parent()
+
+
 def look_up_reference(reference):
     if reference.startswith('C:'):
-        return reference, None
-    elif reference.startswith('L:'):
-        return None, reference
+        return Commit.load(reference)
+    elif reference.startswith('T:'):
+        tag = Tag.load(reference)
+        return Commit.load(tag.head_commit.reference)
     else:
-        raise Exception('"{}" is not a reference'.format(reference))
+        raise UnreachableException() # TODO
 
 
 def command_goto(reference):
     if reference is None:
         raise Exception('"goto" needs a reference') # TODO: UsageException
-    commit, _list = look_up_reference(reference)
-    print 'goto: "{}" {} {}'.format(reference, commit, _list)
+    goto(reference)
 
 
 def command_restack():
@@ -84,11 +191,12 @@ def command_restack():
 command_fns = (
     (('help',), command_help, None),
     (('init',), command_init, 'Creates a wad in the current directory'),
-    (('list',), command_list, None),
-    (('new', 'list'), command_new_list, None),
-    (('new', 'commit'), command_new_commit, None),
-    (('goto',), command_goto, None),
-    (('restack',), command_restack, None)
+    (('log',), command_log, 'Lists commits from the head backwards'),
+    (('new', 'tag'), command_new_tag, 'Creates a new tag and goes to it'),
+    (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
+    (('diff',), command_diff, 'Shows the diff'),
+    (('goto',), command_goto, 'Goes to the given reference'),
+    (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
 )
 
 

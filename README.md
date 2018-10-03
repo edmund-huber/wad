@@ -5,6 +5,12 @@ wad
 of simplicity and predictability. The name is homage to [id Software's WAD file
 format](https://en.wikipedia.org/wiki/Doom_WAD).
 
+Concepts:
+commits, tags, and head
+the changeset and ignoring files
+linear history
+restacking
+
 `wad list`
 
 `wad new list bla bla bla bla`
