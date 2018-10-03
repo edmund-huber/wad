@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 import base64
+import glob
 import hashlib
 import inspect
 import os.path
@@ -163,7 +164,13 @@ def command_diff():
 
 def command_tag():
     check_is_wad_repository()
-    print 'should print all tags' # TODO
+    head_ref = get_head()
+    for tag_fn in glob.glob(os.path.join('.wad', 'T:*')):
+        tag_ref = os.path.basename(tag_fn)
+        print '{} {}'.format(
+            '*' if tag_ref == head_ref else ' ',
+            tag_ref
+        )
 
 
 def command_new_tag(description):
@@ -191,6 +198,8 @@ def command_new_commit(description):
         raise UnreachableException()
 
 
+# TODO: author
+# for author, need to read a ~/.wadconfig
 class Commit(WadObject):
 
     def __init__(self, parent_reference, description):
@@ -210,7 +219,7 @@ class Commit(WadObject):
         if re.search(r'^C:[0-9a-f]+$', reference) is None:
             raise Exception('"{}" is not a valid commit reference.'.format(reference))
 
-    # TODO somehow would like to know that a Commit (with the same logical data) has not changed its reference
+    # TODO somehow would like to know/check that a Commit (with the same logical data) has not changed its reference
 
     @classmethod
     def _load_from_file(cls, reference, f):
@@ -228,8 +237,6 @@ class Commit(WadObject):
             f.write(self.parent_reference + '\n')
         f.write(str(len(self.description)) + '\n')
         f.write(self.description + '\n')
-
-    # TODO: .parent()
 
 
 def look_up_commit(reference):
