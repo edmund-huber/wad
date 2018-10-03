@@ -29,6 +29,8 @@ def command_help(*args):
 
 def goto(reference):
     commit = look_up_reference(reference)
+    # TODO: the actual reading of commits and changing files
+    set_head(reference)
 
 
 class WadObject(object):
@@ -77,8 +79,6 @@ class Tag(WadObject):
     def _write_to_file(self, f):
         f.write(self.head_commit.reference)
 
-    # TODO: .get_head() -> Commit
-
 
 def get_head():
     head_fn = os.path.join('.wad', 'head')
@@ -89,6 +89,15 @@ def get_head():
     except IOError:
         raise UsageException('Broken repository - {} does not exist!'.format(head_fn))
     raise UnreachableException()
+
+
+def set_head(reference):
+    head_fn = os.path.join('.wad', 'head')
+    try:
+        with open(head_fn, 'w') as f:
+            f.write(reference)
+    except IOError:
+        raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
 
 
 def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argument
@@ -121,6 +130,15 @@ def command_init():
 def check_is_wad_repository():
     if not os.path.exists('.wad'):
         raise UsageException('Directory {} is not a wad. Try `wad init`.'.format(os.path.abspath('.')))
+
+
+def command_status():
+    """wad status
+
+    Shows the head, changes, etc.
+    """
+    check_is_wad_repository()
+    print 'head: {}'.format(get_head())
 
 
 def command_log():
@@ -191,6 +209,7 @@ def command_restack():
 command_fns = (
     (('help',), command_help, None),
     (('init',), command_init, 'Creates a wad in the current directory'),
+    (('status',), command_status, 'Shows the current tag, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
     (('new', 'tag'), command_new_tag, 'Creates a new tag and goes to it'),
     (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
