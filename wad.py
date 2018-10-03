@@ -149,7 +149,12 @@ def command_status():
 
 def command_log():
     check_is_wad_repository()
-    print 'log' # TODO
+    commit = look_up_commit(get_head())
+    for _ in range(10):
+        print commit.description
+        if commit.parent_reference is None:
+            break
+        commit = look_up_commit(commit.parent_reference)
 
 
 def command_diff():
