@@ -1,4 +1,5 @@
 #!/usr/bin/env python2
+import base64
 import hashlib
 import inspect
 import os.path
@@ -127,7 +128,7 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    genesis_commit = Commit(None)
+    genesis_commit = Commit(None, 'genesis')
     genesis_commit.store()
     new_tag('T:main', starting_from_commit=genesis_commit)
 
@@ -147,6 +148,7 @@ def command_status():
 
 
 def command_log():
+    check_is_wad_repository()
     print 'log' # TODO
 
 
@@ -170,7 +172,7 @@ def command_new_commit(description):
         raise Exception('"new commit" needs a description') # TODO: UsageException
     head = get_head()
     # pack up all the changes in the commit
-    commit = Commit(look_up_commit(head).get_reference())
+    commit = Commit(look_up_commit(head).get_reference(), description)
     # do not proceed if nothing to commit
     commit.store()
     if head.startswith('T:'):
@@ -186,13 +188,15 @@ def command_new_commit(description):
 
 class Commit(WadObject):
 
-    def __init__(self, parent_reference):
+    def __init__(self, parent_reference, description):
         self.parent_reference = parent_reference
+        self.description = description
 
     def get_reference(self):
         _hash = hashlib.sha1()
         parent_reference = self.parent_reference or ''
-        _hash.update('parent=' + parent_reference)
+        _hash.update('!parent!' + base64.b64encode(parent_reference))
+        _hash.update('!description!' + base64.b64encode(self.description))
         # TODO add other junk, like: contents
         return 'C:' + _hash.hexdigest()
 
@@ -201,17 +205,24 @@ class Commit(WadObject):
         if re.search(r'^C:[0-9a-f]+$', reference) is None:
             raise Exception('"{}" is not a valid commit reference.'.format(reference))
 
+    # TODO somehow would like to know that a Commit (with the same logical data) has not changed its reference
+
     @classmethod
     def _load_from_file(cls, reference, f):
         parent_reference = f.readline().strip() or None
+        description_len = int(f.readline().strip())
+        description = f.read(description_len)
+        f.read(1)
         # TODO: be lazy - don't read the entire commit contents, yet
-        return Commit(parent_reference)
+        return Commit(parent_reference, description)
 
     def _write_to_file(self, f):
         if self.parent_reference is None:
             f.write('\n')
         else:
             f.write(self.parent_reference + '\n')
+        f.write(str(len(self.description)) + '\n')
+        f.write(self.description + '\n')
 
     # TODO: .parent()
 
