@@ -142,22 +142,22 @@ def command_status():
 
 
 def command_log():
-    print 'log'
+    print 'log' # TODO
 
 
 def command_diff():
-    print 'log'
+    print 'diff' # TODO
 
 
 def command_tag():
     check_is_wad_repository()
-    print 'tag'
+    print 'should print all tags' # TODO
 
 
 def command_new_tag(description):
     if description is None:
         raise UsageException('"new tag" needs a description') # TODO: UsageException
-    print 'new tag: "{}"'.format(description)
+    print 'new tag: "{}"'.format(description) # TODO
 
 
 def command_new_commit(description):
@@ -220,7 +220,7 @@ def command_goto(reference):
 
 
 def command_restack():
-    pass
+    pass # TODO
 
 
 command_fns = (
@@ -228,6 +228,7 @@ command_fns = (
     (('init',), command_init, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current tag, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
+    (('tag',), command_tag, 'Lists all tags'),
     (('new', 'tag'), command_new_tag, 'Creates a new tag and goes to it'),
     (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
     (('diff',), command_diff, 'Shows the diff'),
