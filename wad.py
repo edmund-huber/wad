@@ -122,7 +122,7 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    genesis_commit = Commit('C:0') # TODO add a 'next_commit_id' -- but not that, because that won't work distributed
+    genesis_commit = Commit('C:0', None) # TODO add a 'next_commit_id' -- but not that, because that won't work distributed
     genesis_commit.store()
     new_tag('T:main', starting_from_commit=genesis_commit)
 
@@ -163,13 +163,25 @@ def command_new_tag(description):
 def command_new_commit(description):
     if description is None:
         raise Exception('"new commit" needs a description') # TODO: UsageException
-    print 'new commit: "{}"'.format(description)
+    head = get_head()
+    commit = Commit('C:1', look_up_reference(head).reference)
+    commit.store()
+    if head.startswith('T:'):
+        tag = Tag.load(head)
+        tag.head_commit = commit
+        tag.store()
+        goto(head)
+    elif head.startswith('C:'):
+        goto(commit.reference)
+    else:
+        raise UnreachableException()
 
 
 class Commit(WadObject):
 
-    def __init__(self, reference):
+    def __init__(self, reference, parent_reference):
         super(Commit, self).__init__(reference)
+        self.parent_reference = parent_reference
 
     @classmethod
     def _check_reference(cls, reference):
@@ -178,10 +190,15 @@ class Commit(WadObject):
 
     @classmethod
     def _load_from_file(cls, reference, f):
-        return Commit(reference)
+        (parent_reference,) = f.readlines()
+        # TODO: be lazy - don't read the entire commit contents, yet
+        return Commit(reference, parent_reference)
 
     def _write_to_file(self, f):
-        pass
+        if self.parent_reference is None:
+            f.write('\n')
+        else:
+            f.write(self.parent_reference + '\n')
 
     # TODO: .parent()
 
