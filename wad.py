@@ -31,10 +31,23 @@ def command_help(*args):
 
 
 def goto(reference):
+    # The reference must not be broken.
     commit = look_up_commit(reference)
-    # TODO: the actual reading of commits and changing files
-    set_head(reference)
+    # The repository must be clean.
+    if len(diff()) > 0:
+        raise UsageException("Can't goto when there are un-committed or stashed changes.")
+    # Store the new head.
+    head_fn = os.path.join('.wad', 'head')
+    try:
+        with open(head_fn, 'w') as f:
+            f.write(reference)
+    except IOError:
+        raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
 
+
+# TODO: multi-tenancy doesn't work. lack of any lockfile means that wad operations can't be interleaved
+# TODO: also no way to recover if an operation dies halfway - have a .wad/mirror directory that gets merged in at end?
+# or keep multiple directories and point at the current one?
 
 class WadObject(object):
 
@@ -96,15 +109,6 @@ def get_head():
     except IOError:
         raise UsageException('Broken repository - {} does not exist!'.format(head_fn))
     raise UnreachableException()
-
-
-def set_head(reference):
-    head_fn = os.path.join('.wad', 'head')
-    try:
-        with open(head_fn, 'w') as f:
-            f.write(reference)
-    except IOError:
-        raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
 
 
 def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argument
@@ -268,6 +272,7 @@ command_fns = (
     (('tag',), command_tag, 'Lists all tags'),
     (('new', 'tag'), command_new_tag, 'Creates a new tag and goes to it'),
     (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
+    # TODO: need some way to do staging, i.e., 'commit only these files'
     (('diff',), command_diff, 'Shows the diff'),
     (('goto',), command_goto, 'Goes to the given reference'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
