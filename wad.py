@@ -281,22 +281,24 @@ class Directory(WadObject):
 def register_path(path):
     if os.path.isfile(path):
         f = File(None)
-        f.set('name', os.path.basename(path)) # TODO: normalize path to something platform-independent
+        f.set('name', os.path.basename(path))
         f.set('permissions', 'TODO')
         f.set('contents', source_filename=path)
-        f.store() # TODO?
+        f.store()
         return f
     # TODO: elif link..
     elif os.path.isdir(path):
         d = Directory(None)
-        d.set('name', os.path.basename(path)) # same TODO as above
+        d.set('name', os.path.basename(path))
         d.set('permissions', 'TODO')
         entries = set()
         for entry in os.listdir(path):
-            _object = register_path(os.path.join(path, entry))
-            entries.add(_object)
+            sub_path = os.path.join(path, entry)
+            if sub_path != './.wad': # TODO need to think about how/whether wad works if called out of current dir
+                _object = register_path(sub_path)
+                entries.add(_object)
         d.set('entries', entries)
-        d.store() # TODO?
+        d.store()
         return d
     raise UnreachableException() #TODO
 
@@ -314,11 +316,7 @@ def command_init():
     init_commit.set('description', 'wad init')
     root = register_path('.')
     root.store()
-    # should store() now? will store() inner references?
-    # TODO yes because, when set(WadObject), name must end with '.ref', (otherwise, '.str') and when store() object, should
-    # look for items that end with .ref and store() those too
     init_commit.set('root', root.get_reference())
-    # TODO ignore .wad
     init_commit.store()
     new_topic('main', starting_from_commit=init_commit)
 
@@ -426,6 +424,8 @@ command_fns = (
     (('diff',), command_diff, 'Shows the diff'),
     (('goto',), command_goto, 'Goes to the given reference'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
+    # TODO: add clean: looks for orphaned objects
+    # TODO: add dump <reference>: loads up the reference and calls a WadObject type -specific .dump()
 )
 
 
