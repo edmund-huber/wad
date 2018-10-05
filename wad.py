@@ -65,8 +65,6 @@ class WadObjectRegistry(type):
 
 class WadObject(object):
 
-    _type = None
-
     def __init__(self, reference):
         self._stage_dir_and_flock = None
         self._reference = reference # TODO: sub_ref, because not canonical like commit/323342
@@ -90,7 +88,7 @@ class WadObject(object):
 
     def get_reference(self):
         if self._reference is None:
-            raise Exception() # TODO internalexceptoin
+            raise Exception('no reference assigned yet, did you store()?') # TODO internalexceptoin
         return type(self).get_reference_prefix() + self._reference
 
     def _reference_dir(self):
@@ -161,32 +159,73 @@ class WadObject(object):
             pass
         if value is not None:
             assert source_filename is None
+            if isinstance(value, str):
+                pass
+            elif isinstance(value, set) and all(isinstance(v, WadObject) for v in value):
+                sub_refs = [_object.get_reference() for _object in value]
+                sub_refs.sort()
+                value = '\n'.join(sub_refs)
+            else:
+                raise UnreachableException() # TODO
             with open(object_dir_path, 'w') as f:
                 f.write(value)
         elif source_filename is not None:
             assert value is None
+            # TODO, perf? maybe just put in a symlink now, and when unstaged,
+            # symlink replaced with a copy of the file
             shutil.copy(source_filename, object_dir_path)
 
     def store(self):
-        # If there are staged changes:
-        if self._stage_dir_and_flock is not None:
-            stage_dir, flock = self._stage_dir_and_flock
-            # first check that required content isn't missing.
-            for path in self._required_contents:
-                path = os.path.join(stage_dir, path)
-                if not os.path.exists(path):
-                    raise Exception('missing path {}'.format(path)) # TODO InternalExceptoin
-            # then move the directory over to the right place.
-            flock.close()
-            os.remove(os.path.join(stage_dir, 'lock'))
-            shutil.move(stage_dir, self._reference_dir())
+        # If there aren't staged changes, then there's nothing to do.
+        if self._stage_dir_and_flock is None:
+            return
+        # First check the attributes.
+        stage_dir, flock = self._stage_dir_and_flock
+        attributes = set()
+        for dirpath, _, filenames in os.walk(stage_dir):
+            for fn in filenames:
+                attributes.add(unroot_path(os.path.join(dirpath, fn), stage_dir))
+        attributes.remove('lock')
+        if not set(attributes) == set(self._attributes):
+            raise Exception('{}, {}'.format(attributes, self._attributes)) # internalexceptoin
+        # If this WadObject type is supposed to autogenerate its reference,
+        # then generate the reference from the sha1 of everything in the staged
+        # directory.
+        paths = []
+        for dirpath, dirnames, filenames in os.walk(self.object_dir()):
+            for fn in filenames:
+                paths.append(os.path.join(dirpath, fn))
+        paths.sort()
+        _hash = hashlib.sha1()
+        for path in paths:
+            _hash.update('!path!' + base64.b64encode(path))
+            with open(path) as f:
+                for chunk in f.read(1000000):
+                    if chunk == '':
+                        break
+                    _hash.update('!chunk!' + base64.b64encode(chunk))
+        self._reference = _hash.hexdigest()
+        # Then move the stage directory over to the right place.
+        flock.close()
+        os.remove(os.path.join(stage_dir, 'lock'))
+        shutil.move(stage_dir, self._reference_dir())
+        self._stage_dir_and_flock = None
+
+
+# replace remaining uses of relative_dirpath with this
+def unroot_path(path, root):
+    dirname = os.path.dirname(path)
+    relative_dirname = os.path.relpath(dirname, root)
+    if relative_dirname == '.':
+        relative_dirname = ''
+    unrooted_path = os.path.join(relative_dirname, os.path.basename(path))
+    return unrooted_path
 
 
 class Topic(WadObject):
     __metaclass__ = WadObjectRegistry
-
     _type = 'topic'
-    _required_contents = {
+    _attributes = {
         'description',
         'head'
     }
@@ -217,6 +256,51 @@ def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argu
     goto(topic.get_reference())
 
 
+class File(WadObject):
+    __metaclass__ = WadObjectRegistry
+    _type = 'file'
+    _attributes = {
+        'name',
+        'permissions',
+        'contents'
+    }
+    _autogen_reference = True
+
+
+class Directory(WadObject):
+    __metaclass__ = WadObjectRegistry
+    _type = 'directory'
+    _attributes = {
+        'name',
+        'permissions',
+        'entries'
+    }
+    _autogen_reference = True
+
+
+def register_path(path):
+    if os.path.isfile(path):
+        f = File(None)
+        f.set('name', os.path.basename(path)) # TODO: normalize path to something platform-independent
+        f.set('permissions', 'TODO')
+        f.set('contents', source_filename=path)
+        f.store() # TODO?
+        return f
+    # TODO: elif link..
+    elif os.path.isdir(path):
+        d = Directory(None)
+        d.set('name', os.path.basename(path)) # same TODO as above
+        d.set('permissions', 'TODO')
+        entries = set()
+        for entry in os.listdir(path):
+            _object = register_path(os.path.join(path, entry))
+            entries.add(_object)
+        d.set('entries', entries)
+        d.store() # TODO?
+        return d
+    raise UnreachableException() #TODO
+
+
 def command_init():
     """wad init
 
@@ -228,17 +312,13 @@ def command_init():
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
     init_commit = Commit(None)
     init_commit.set('description', 'wad init')
-    for dirpath, dirnames, filenames in os.walk('.'):
-        # TODO need to do .wad/ignore
-        if dirpath.startswith(os.path.join('.', '.wad', '')):
-            # Don't include files under '.wad/'.
-            continue
-        for fn in filenames:
-            relative_dirpath = os.path.relpath(dirpath, '.')
-            init_commit.set(
-                os.path.join('tree', relative_dirpath, fn),
-                source_filename=os.path.join(dirpath, fn)
-            )
+    root = register_path('.')
+    root.store()
+    # should store() now? will store() inner references?
+    # TODO yes because, when set(WadObject), name must end with '.ref', (otherwise, '.str') and when store() object, should
+    # look for items that end with .ref and store() those too
+    init_commit.set('root', root.get_reference())
+    # TODO ignore .wad
     init_commit.store()
     new_topic('main', starting_from_commit=init_commit)
 
@@ -316,35 +396,12 @@ def command_new_commit(description):
 # for author, need to read a ~/.wadconfig
 class Commit(WadObject):
     __metaclass__ = WadObjectRegistry
-
     _type = 'commit'
-    _required_contents = {
+    _attributes = {
         'description',
-        'tree'
+        'root'
     }
-
-    def store(self):
-        # If there are staged changes, figure out what the new reference should
-        # be.
-        if self._stage_dir_and_flock is not None:
-            # Find all files in the commit, sort them, then do a sha1 hash of all
-            # filenames and their contents.
-            paths = []
-            for dirpath, dirnames, filenames in os.walk(self.object_dir()):
-                for fn in filenames:
-                    paths.append(os.path.join(dirpath, fn))
-            paths.sort()
-            _hash = hashlib.sha1()
-            for path in paths:
-                _hash.update('!path!' + base64.b64encode(path))
-                with open(path) as f:
-                    for chunk in f.read(1000000):
-                        if chunk == '':
-                            break
-                        _hash.update('!chunk!' + base64.b64encode(chunk))
-            self._reference = _hash.hexdigest()
-        # TODO: might need to think about copying metadata too -- so that mtime is preserved?
-        super(Commit, self).store()
+    _autogen_reference = True
 
 
 def command_goto(reference):
