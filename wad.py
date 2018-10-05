@@ -179,35 +179,37 @@ class WadObject(object):
         # If there aren't staged changes, then there's nothing to do.
         if self._stage_dir_and_flock is None:
             return
-        # First check the attributes.
+        # Get rid of the flock.
         stage_dir, flock = self._stage_dir_and_flock
+        flock.close()
+        os.remove(os.path.join(stage_dir, 'lock'))
+        # Check the attributes to make sure the object is complete.
         attributes = set()
         for dirpath, _, filenames in os.walk(stage_dir):
             for fn in filenames:
                 attributes.add(unroot_path(os.path.join(dirpath, fn), stage_dir))
-        attributes.remove('lock')
         if not set(attributes) == set(self._attributes):
             raise Exception('{}, {}'.format(attributes, self._attributes)) # internalexceptoin
         # If this WadObject type is supposed to autogenerate its reference,
         # then generate the reference from the sha1 of everything in the staged
         # directory.
-        paths = []
-        for dirpath, dirnames, filenames in os.walk(self.object_dir()):
-            for fn in filenames:
-                paths.append(os.path.join(dirpath, fn))
-        paths.sort()
-        _hash = hashlib.sha1()
-        for path in paths:
-            _hash.update('!path!' + base64.b64encode(path))
-            with open(path) as f:
-                for chunk in f.read(1000000):
-                    if chunk == '':
-                        break
-                    _hash.update('!chunk!' + base64.b64encode(chunk))
-        self._reference = _hash.hexdigest()
+        if self._autogen_reference:
+            paths = []
+            for dirpath, dirnames, filenames in os.walk(self.object_dir()):
+                for fn in filenames:
+                    paths.append(os.path.join(dirpath, fn))
+            paths.sort()
+            _hash = hashlib.sha1()
+            for path in paths:
+                _hash.update('!path!' + base64.b64encode(unroot_path(path, stage_dir)))
+                with open(path) as f:
+                    for chunk in f.read(1000000):
+                        if chunk == '':
+                            break
+                        _hash.update('!chunk!' + base64.b64encode(chunk))
+            self._reference = _hash.hexdigest()
+        assert self._reference is not None
         # Then move the stage directory over to the right place.
-        flock.close()
-        os.remove(os.path.join(stage_dir, 'lock'))
         shutil.move(stage_dir, self._reference_dir())
         self._stage_dir_and_flock = None
 
@@ -229,7 +231,7 @@ class Topic(WadObject):
         'description',
         'head'
     }
-
+    _autogen_reference = False
 
 def get_head():
     head_fn = os.path.join('.wad', 'head')
