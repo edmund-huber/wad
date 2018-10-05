@@ -71,9 +71,19 @@ class WadObject(object):
         if reference is None:
             self._set_up_stage()
 
+    def __str__(self):
+        s = type(self).__name__ + '('
+        first = True
+        for attribute in self._attributes | self._optional_attributes:
+            if not first:
+                s += ', '
+            s += '{}="{}"'.format(attribute, self.get(attribute))
+            first = False
+        return s + ')'
+
     @classmethod
     def get_reference_prefix(cls):
-        return cls._type + '/'
+        return cls.__name__.lower() + '/'
 
     @classmethod
     def look_up(cls, reference):
@@ -86,13 +96,13 @@ class WadObject(object):
     def does_exist(self):
         return self._reference is None
 
-    def get_reference(self):
+    def get_reference(self): # TODO all reference -> ref, all object -> obj, only one head, topics have starting_commit
         if self._reference is None:
             raise Exception('no reference assigned yet, did you store()?') # TODO internalexceptoin
         return type(self).get_reference_prefix() + self._reference
 
     def _reference_dir(self):
-        return os.path.join('.wad', self._type, self._reference)
+        return os.path.join('.wad', type(self).__name__.lower(), self._reference)
 
     def _set_up_stage(self):
         # If staging is already set up, then there's nothing to do.
@@ -100,7 +110,7 @@ class WadObject(object):
             return
         # Create a unique stage for the changes to this object, starting with a
         # copy of the object.
-        all_stages_dir = os.path.join('.wad', 'stage', self._type)
+        all_stages_dir = os.path.join('.wad', 'stage', type(self).__name__.lower())
         try:
             os.makedirs(all_stages_dir)
         except OSError:
@@ -111,14 +121,16 @@ class WadObject(object):
             # shutil.copytree(), but it doesn't like it if the destination
             # directory already exists.
             for dirpath, dirnames, filenames in os.walk(self._reference_dir()):
-                relative_dirpath = os.path.relpath(dirpath, self._reference_dir())
-                for dirname in dirnames:
-                    os.makedirs(os.path.join(self._reference_dir(), relative_dirpath, dirname))
                 for filename in filenames:
-                    shutil.copy(
-                        os.path.join(dirpath, filename),
-                        os.path.join(self._reference_dir(), relative_dirpath, filename)
-                    )
+                    path = os.path.join(dirpath, filename)
+                    relative_path = unroot_path(path, self._reference_dir())
+                    stage_path = os.path.join(stage_dir, relative_path)
+                    try:
+                        os.makedirs(os.path.dirname(stage_path))
+                    except OSError: # TODO import path?
+                        # TODO it's silly that makedirs can fail if the directories exist already. replace?
+                        pass
+                    shutil.copy(path, stage_path)
         # The lock lets 'wad status' know that this staging directory is still
         # in use - on the other hand, if another process acquires this lock,
         # waits a few moments, and the directory is still present, then it is
@@ -188,8 +200,11 @@ class WadObject(object):
         for dirpath, _, filenames in os.walk(stage_dir):
             for fn in filenames:
                 attributes.add(unroot_path(os.path.join(dirpath, fn), stage_dir))
-        if not set(attributes) == set(self._attributes):
-            raise Exception('{}, {}'.format(attributes, self._attributes)) # internalexceptoin
+        if not attributes.issuperset(self._attributes):
+            raise Exception('{}, {}'.format(attributes, self._attributes)) # TODO internalexceptoin
+        superset = self._attributes | self._optional_attributes
+        if not attributes.issubset(superset):
+            raise Exception('{}, {}'.format(attributes, superset)) # TODO internalexceptoin
         # If this WadObject type is supposed to autogenerate its reference,
         # then generate the reference from the sha1 of everything in the staged
         # directory.
@@ -210,6 +225,8 @@ class WadObject(object):
             self._reference = _hash.hexdigest()
         assert self._reference is not None
         # Then move the stage directory over to the right place.
+        if os.path.exists(self._reference_dir()):
+            shutil.rmtree(self._reference_dir())
         shutil.move(stage_dir, self._reference_dir())
         self._stage_dir_and_flock = None
 
@@ -226,22 +243,32 @@ def unroot_path(path, root):
 
 class Topic(WadObject):
     __metaclass__ = WadObjectRegistry
-    _type = 'topic'
-    _attributes = {
-        'description',
-        'head'
-    }
+    _attributes = {'description', 'head'}
+    _optional_attributes = set()
     _autogen_reference = False
+
 
 def get_head():
     head_fn = os.path.join('.wad', 'head')
     try:
         with open(head_fn) as f:
             (head,) = f.readlines()
-            return head
     except IOError:
         raise UsageException('Broken repository - {} does not exist!'.format(head_fn))
-    raise UnreachableException()
+    obj = WadObject.look_up(head)
+    if not isinstance(obj, Topic) and not isinstance(obj, Commit):
+        raise InternalError('{} is not a valid head.'.format(obj))
+    return obj
+
+
+def get_head_commit():
+    obj = get_head()
+    if isinstance(obj, Topic):
+        return WadObject.look_up(obj.get('head'))
+    elif isinstance(obj, Commit):
+        return obj
+    else:
+        raise UnreachablException() #TODO
 
 
 def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argument
@@ -260,23 +287,15 @@ def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argu
 
 class File(WadObject):
     __metaclass__ = WadObjectRegistry
-    _type = 'file'
-    _attributes = {
-        'name',
-        'permissions',
-        'contents'
-    }
+    _attributes = {'name', 'permissions', 'contents'}
+    _optional_attributes = set()
     _autogen_reference = True
 
 
 class Directory(WadObject):
     __metaclass__ = WadObjectRegistry
-    _type = 'directory'
-    _attributes = {
-        'name',
-        'permissions',
-        'entries'
-    }
+    _attributes = {'name', 'permissions', 'entries'}
+    _optional_attributes = set()
     _autogen_reference = True
 
 
@@ -334,25 +353,21 @@ def command_status():
     Shows the head, changes, etc.
     """
     check_is_wad_repository()
-    print 'head: {}'.format(get_head())
+    print 'head: {}'.format(get_head().get_reference())
 
 
 # TODO all look_up_commit -> WadObject.look_up
 def command_log():
     check_is_wad_repository()
-    _object = WadObject.look_up(get_head())
-    if isinstance(_object, Topic):
-        _object = WadObject.look_up(_object.get('head'))
-    elif isinstance(_object, Commit):
-        pass
+    commit = get_head_commit()
     for _ in range(10):
-        if not isinstance(_object, Commit):
+        if not isinstance(commit, Commit):
             raise InternalException() # TODO
-        print _object.get('description')
-        parent = _object.get('parent')
+        print '{}    {}'.format(commit.get_reference(), commit.get('description'))
+        parent = commit.get('parent')
         if parent is None:
             break
-        _object = WadObject.look_up(parent)
+        commit = WadObject.look_up(parent)
 
 
 def command_diff():
@@ -379,23 +394,26 @@ def command_new_topic(reference): # TODO optional: starting_from
 def command_new_commit(description):
     if description is None:
         raise Exception('"new commit" needs a description') # TODO: UsageException
+    # Make a new commit starting from the head.
+    head = get_head_commit()
+    new_commit = Commit(None)
+    new_commit.set('description', description)
+    root = register_path('.') # TODO should happen automatically on Commit()? (these 3 lines)
+    root.store()
+    new_commit.set('parent', head.get_reference())
+    new_commit.set('root', root.get_reference())
+    new_commit.store()
+    # TODO ^ this is all identical to part of new_topic
+    # If the head is a topic, alter it.
     head = get_head()
-    # pack up all the changes in the commit
-    commit = Commit(look_up_commit(head).get_reference(), description)
-    # TODO for filename in diff(): commit.add_files(..)
-    # do not proceed if nothing to commit
-    commit.store()
-    # TODO: add a typesregistry for wadobjects, so the scaffolded if isn't necessary
-    _object = WadObject.look_up(head)
-    if isinstance(_object, Topic):
-        topic = _object
-        topic.set('head', commit.get_reference())
-        topic.store()
-        goto(head)
-    elif isinstance(_object, Commit):
+    if isinstance(head, Topic):
+        head.set('head', new_commit.get_reference())
+        head.store()
+        goto(head.get_reference())
+    elif isinstance(head, Commit):
         # If we're in detached mode, the new head is just whatever we finished
         # committing.
-        goto(commit.get_reference())
+        goto(new_commit.get_reference())
     else:
         raise UnreachableException()
 
@@ -404,12 +422,8 @@ def command_new_commit(description):
 # for author, need to read a ~/.wadconfig
 class Commit(WadObject):
     __metaclass__ = WadObjectRegistry
-    _type = 'commit'
-    _attributes = {
-        'description',
-        # parent can be None!
-        'root'
-    }
+    _attributes = {'description', 'root'}
+    _optional_attributes = {'parent'}
     _autogen_reference = True
 
 
