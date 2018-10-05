@@ -75,7 +75,7 @@ class WadObject(object):
             self._write_to_file(f)
 
 
-class Tag(WadObject):
+class Topic(WadObject):
 
     def __init__(self, reference, head_commit):
         self.reference = reference
@@ -87,7 +87,7 @@ class Tag(WadObject):
     @classmethod
     def _check_reference(cls, reference):
         if re.search(r'^T:[a-z_]+$', reference) is None:
-            raise Exception('"{}" is not a valid tag reference.'.format(reference))
+            raise Exception('"{}" is not a valid topic reference.'.format(reference))
 
     @classmethod
     def _load_from_file(cls, reference, f):
@@ -95,7 +95,7 @@ class Tag(WadObject):
         head_commit = Commit.load(head)
         if head_commit is None:
             raise Exception("{}, pointed at by {}, doesn't exist!".format(head, reference))
-        return Tag(reference, head_commit)
+        return Topic(reference, head_commit)
 
     def _write_to_file(self, f):
         f.write(self.head_commit.get_reference())
@@ -112,17 +112,17 @@ def get_head():
     raise UnreachableException()
 
 
-def new_tag(name, starting_from_commit=None): # TODO: and 'starting from' argument
-    if Tag.load(name) is not None:
-        raise UsageException('Tag "{}" already exists.'.format(name))
+def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argument
+    if Topic.load(name) is not None:
+        raise UsageException('Topic "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
     if starting_from_commit is None:
         head_commit = look_up_commit(get_head())
-        tag = Tag(name, head_commit)
+        topic = Topic(name, head_commit)
     else:
-        tag = Tag(name, starting_from_commit)
-    tag.store()
-    goto(tag.get_reference())
+        topic = Topic(name, starting_from_commit)
+    topic.store()
+    goto(topic.get_reference())
 
 
 def command_init():
@@ -145,7 +145,7 @@ def command_init():
         for fn in filenames:
             init_commit.add_file(os.path.join(dirpath, fn))
     init_commit.store()
-    new_tag('main', starting_from_commit=init_commit)  # TODO tag -> topic
+    new_topic('main', starting_from_commit=init_commit)
 
 
 def check_is_wad_repository():
@@ -176,21 +176,21 @@ def command_diff():
     print 'diff' # TODO
 
 
-def command_tag():
+def command_topic():
     check_is_wad_repository()
     head_ref = get_head()
-    for tag_fn in glob.glob(os.path.join('.wad', 'T:*')):
-        tag_ref = os.path.basename(tag_fn)
+    for topic_fn in glob.glob(os.path.join('.wad', 'T:*')):
+        topic_ref = os.path.basename(topic_fn)
         print '{} {}'.format(
-            '*' if tag_ref == head_ref else ' ',
-            tag_ref
+            '*' if topic_ref == head_ref else ' ',
+            topic_ref
         )
 
 
-def command_new_tag(reference): # TODO optional: starting_from
+def command_new_topic(reference): # TODO optional: starting_from
     if reference is None:
-        raise UsageException('"new tag" needs a reference') # TODO: UsageException
-    new_tag(reference)
+        raise UsageException('"new topic" needs a reference') # TODO: UsageException
+    new_topic(reference)
 
 
 def command_new_commit(description):
@@ -203,9 +203,9 @@ def command_new_commit(description):
     # do not proceed if nothing to commit
     commit.store()
     if head.startswith('T:'):
-        tag = Tag.load(head)
-        tag.head_commit = commit
-        tag.store()
+        topic = Topic.load(head)
+        topic.head_commit = commit
+        topic.store()
         goto(head)
     elif head.startswith('C:'):
         goto(commit.get_reference())
@@ -323,9 +323,9 @@ def look_up_commit(reference):
     if reference.startswith('C:'):
         return Commit.load(reference)
     elif reference.startswith('T:'):
-        tag = Tag.load(reference)
-        assert tag is not None
-        return Commit.load(tag.head_commit.get_reference())
+        topic = Topic.load(reference)
+        assert topic is not None
+        return Commit.load(topic.head_commit.get_reference())
     else:
         raise UnreachableException() # TODO
 
@@ -343,10 +343,10 @@ def command_restack():
 command_fns = (
     (('help',), command_help, None),
     (('init',), command_init, 'Creates a wad in the current directory'),
-    (('status',), command_status, 'Shows the current tag, changes, etc'),
+    (('status',), command_status, 'Shows the current topic, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
-    (('tag',), command_tag, 'Lists all tags'),
-    (('new', 'tag'), command_new_tag, 'Creates a new tag and goes to it'),
+    (('topic',), command_topic, 'Lists all topic'),
+    (('new', 'topic'), command_new_topic, 'Creates a new topic and goes to it'),
     (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
     # TODO: need some way to do staging, i.e., 'commit only these files'
     (('diff',), command_diff, 'Shows the diff'),
