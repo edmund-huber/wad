@@ -144,7 +144,7 @@ class WadObject(object):
             return self._reference_dir()
 
     def get(self, path):
-        fn = os.path.join(self.object_dir(), key)
+        fn = os.path.join(self.object_dir(), path)
         if os.path.isfile(fn):
             with open(fn) as f:
                 return f.read()
@@ -337,14 +337,22 @@ def command_status():
     print 'head: {}'.format(get_head())
 
 
+# TODO all look_up_commit -> WadObject.look_up
 def command_log():
     check_is_wad_repository()
-    commit = look_up_commit(get_head())
+    _object = WadObject.look_up(get_head())
+    if isinstance(_object, Topic):
+        _object = WadObject.look_up(_object.get('head'))
+    elif isinstance(_object, Commit):
+        pass
     for _ in range(10):
-        print commit.description
-        if commit.parent_reference is None:
+        if not isinstance(_object, Commit):
+            raise InternalException() # TODO
+        print _object.get('description')
+        parent = _object.get('parent')
+        if parent is None:
             break
-        commit = look_up_commit(commit.parent_reference)
+        _object = WadObject.look_up(parent)
 
 
 def command_diff():
@@ -399,6 +407,7 @@ class Commit(WadObject):
     _type = 'commit'
     _attributes = {
         'description',
+        # parent can be None!
         'root'
     }
     _autogen_reference = True
