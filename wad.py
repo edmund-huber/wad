@@ -74,9 +74,13 @@ class WadObject(object):
             self._set_up_stage()
 
     @classmethod
+    def get_reference_prefix(cls):
+        return cls._type + '/'
+
+    @classmethod
     def look_up(cls, reference):
         for registered_cls in WadObjectRegistry.get():
-            prefix = registered_cls._type + '/' # TODO should be one place to build this
+            prefix = registered_cls.get_reference_prefix()
             if reference.startswith(prefix):
                 return registered_cls(reference[len(prefix):])
         return None
@@ -87,7 +91,7 @@ class WadObject(object):
     def get_reference(self):
         if self._reference is None:
             raise Exception() # TODO internalexceptoin
-        return self._type + '/' + self._reference
+        return type(self).get_reference_prefix() + self._reference
 
     def _reference_dir(self):
         return os.path.join('.wad', self._type, self._reference)
