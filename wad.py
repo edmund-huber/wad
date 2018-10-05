@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import os.path
 import re
+import shutil
 import sys
 
 # TODO: pepwhatever, pyflakes
@@ -133,9 +134,18 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    genesis_commit = Commit(None, 'genesis')
-    genesis_commit.store()
-    new_tag('T:main', starting_from_commit=genesis_commit)
+    os.mkdir(os.path.join('.wad', 'commits'))
+    os.mkdir(os.path.join('.wad', 'topics'))
+    init_commit = Commit()
+    init_commit.set_description('wad init')
+    for dirpath, dirnames, filenames in os.walk('.'):
+        if dirpath.startswith(os.path.join('.', '.wad', '')):
+            # Don't include files under '.wad/'.
+            continue
+        for fn in filenames:
+            init_commit.add_file(os.path.join(dirpath, fn))
+    init_commit.store()
+    new_tag('main', starting_from_commit=init_commit)  # TODO tag -> topic
 
 
 def check_is_wad_repository():
@@ -189,6 +199,7 @@ def command_new_commit(description):
     head = get_head()
     # pack up all the changes in the commit
     commit = Commit(look_up_commit(head).get_reference(), description)
+    # TODO for filename in diff(): commit.add_files(..)
     # do not proceed if nothing to commit
     commit.store()
     if head.startswith('T:'):
@@ -204,19 +215,84 @@ def command_new_commit(description):
 
 # TODO: author
 # for author, need to read a ~/.wadconfig
-class Commit(WadObject):
+class Commit(object):
 
-    def __init__(self, parent_reference, description):
-        self.parent_reference = parent_reference
-        self.description = description
+    def __init__(self, reference=None):
+        self.reference = reference
 
-    def get_reference(self):
+    def _commit_dir(self):
+        if self.reference == 'stage':
+            return os.path.join('.wad', 'stage')
+        else:
+            return os.path.join('.wad', 'commits', self.reference)
+
+    def _set_up_stage(self):
+        stage_dirname = os.path.join('.wad', 'stage')
+        if self.reference != 'stage':
+            if os.path.isdir(stage_dirname):
+                raise UnreachableException('The stage was not cleaned up.')
+            os.mkdir(stage_dirname)
+            self.reference = 'stage'
+
+    def get_parent(self):
+        # TODO read from reference/parent
+        pass
+
+    def set_parent(self, commit):
+        self._set_up_stage()
+        # TODO write parent into stage
+        pass
+
+    def get_description(self):
+        # TODO see above
+        pass
+
+    def set_description(self, description):
+        self._set_up_stage()
+        with open(os.path.join(self._commit_dir(), 'description'), 'w') as f:
+            f.write(description)
+
+    # After 'add_file' is called once, a Commit is 'staged', meaning that it
+    # needs to be store()d.
+    # TODO: force use with contexts
+    def add_file(self, filename):
+        print 'add_file: {}'.format(filename)
+        self._set_up_stage()
+        path_in_tree = os.path.join(self._commit_dir(), 'tree', filename)
+        try:
+            os.makedirs(os.path.dirname(path_in_tree))
+        except OSError:
+            pass
+        shutil.copyfile(filename, path_in_tree)
+
+    def store(self):
+        if self.reference != 'stage':
+            raise InternalException() # TODO
+        # Find all files in the commit, sort them, then do a sha1 hash of all
+        # filenames and their contents.
+        paths = []
+        for dirpath, dirnames, filenames in os.walk(self._commit_dir()):
+            for fn in filenames:
+                paths.append(os.path.join(dirpath, fn))
+        paths.sort()
         _hash = hashlib.sha1()
-        parent_reference = self.parent_reference or ''
-        _hash.update('!parent!' + base64.b64encode(parent_reference))
-        _hash.update('!description!' + base64.b64encode(self.description))
-        # TODO add other junk, like: contents
-        return 'C:' + _hash.hexdigest()
+        for path in paths:
+            _hash.update('!path!' + base64.b64encode(path))
+            with open(path) as f:
+                for chunk in f.read(1000000):
+                    if chunk == '':
+                        break
+                    _hash.update('!chunk!' + base64.b64encode(chunk))
+        # Move the commit contents to the proper commit directory, and delete
+        # stage.
+        stage_dirname = os.path.join('.wad', 'stage')
+        self.reference = _hash.hexdigest()
+        if os.path.isdir(self._commit_dir()):
+            raise InternalException()
+        shutil.move(stage_dirname, self._commit_dir())
+        # TODO: might need to think about copying metadata too -- so that mtime is preserved?
+
+    # TODO: uses of os.walk safe against circular links? does it follow them?
 
     @classmethod
     def _check_reference(cls, reference):
