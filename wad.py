@@ -155,16 +155,16 @@ class WadObject(object):
             assert self._reference is not None
             return self._reference_dir()
 
-    def get(self, path):
-        fn = os.path.join(self.object_dir(), path)
+    def get(self, attribute):
+        fn = os.path.join(self.object_dir(), attribute)
         if os.path.isfile(fn):
             with open(fn) as f:
                 return f.read()
         return None
 
-    def set(self, path, value=None, source_filename=None):
+    def set(self, attribute, value=None, source_filename=None):
         self._set_up_stage()
-        object_dir_path = os.path.join(self.object_dir(), path)
+        object_dir_path = os.path.join(self.object_dir(), attribute)
         try:
             os.makedirs(os.path.dirname(object_dir_path))
         except OSError:
@@ -243,7 +243,7 @@ def unroot_path(path, root):
 
 class Topic(WadObject):
     __metaclass__ = WadObjectRegistry
-    _attributes = {'description', 'head'}
+    _attributes = {'description.str', 'tip.commit_ref'}
     _optional_attributes = set()
     _autogen_reference = False
 
@@ -264,7 +264,7 @@ def get_head():
 def get_head_commit():
     obj = get_head()
     if isinstance(obj, Topic):
-        return WadObject.look_up(obj.get('head'))
+        return WadObject.look_up('tip.commit_ref')
     elif isinstance(obj, Commit):
         return obj
     else:
@@ -276,51 +276,39 @@ def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argu
     if topic.does_exist():
         raise UsageException('Topic "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
-    topic.set('description', 'TODO')
+    topic.set('description.str', 'TODO')
     if starting_from_commit is None:
-        topic.set('head', look_up_commit(get_head()))
+        topic.set('tip.commit_ref', look_up_commit(get_head()))
     else:
-        topic.set('head', starting_from_commit.get_reference())
+        topic.set('tip.commit_ref', starting_from_commit.get_reference())
     topic.store()
     goto(topic.get_reference())
 
 
-class File(WadObject):
+class Entry(WadObject):
     __metaclass__ = WadObjectRegistry
-    _attributes = {'name', 'permissions', 'contents'}
-    _optional_attributes = set()
-    _autogen_reference = True
-
-
-class Directory(WadObject):
-    __metaclass__ = WadObjectRegistry
-    _attributes = {'name', 'permissions', 'entries'}
-    _optional_attributes = set()
+    _attributes = {'name', 'permissions'}
+    _optional_attributes = {'contents', 'entries'}
     _autogen_reference = True
 
 
 def register_path(path):
-    if os.path.isfile(path):
-        f = File(None)
-        f.set('name', os.path.basename(path))
-        f.set('permissions', 'TODO')
-        f.set('contents', source_filename=path)
-        f.store()
-        return f
-    # TODO: elif link..
-    elif os.path.isdir(path):
-        d = Directory(None)
-        d.set('name', os.path.basename(path))
-        d.set('permissions', 'TODO')
-        entries = set()
-        for entry in os.listdir(path):
-            sub_path = os.path.join(path, entry)
-            if sub_path != './.wad': # TODO need to think about how/whether wad works if called out of current dir
-                _object = register_path(sub_path)
-                entries.add(_object)
-        d.set('entries', entries)
-        d.store()
-        return d
+    if os.path.isfile(path) or os.path.isdir(path): # TODO elif link..
+        e = Entry(None)
+        e.set('name', os.path.basename(path))
+        e.set('permissions', 'TODO')
+        if os.path.isfile(path):
+            e.set('contents', source_filename=path)
+        elif os.path.isdir(path):
+            entries = set()
+            for entry in os.listdir(path):
+                sub_path = os.path.join(path, entry)
+                if sub_path != './.wad': # TODO need to think about how/whether wad works if called out of current dir
+                    _object = register_path(sub_path)
+                    entries.add(_object)
+            e.set('entries', entries)
+        e.store()
+        return e
     raise UnreachableException() #TODO
 
 
@@ -407,7 +395,7 @@ def command_new_commit(description):
     # If the head is a topic, alter it.
     head = get_head()
     if isinstance(head, Topic):
-        head.set('head', new_commit.get_reference())
+        head.set('head.commit_ref', new_commit)
         head.store()
         goto(head.get_reference())
     elif isinstance(head, Commit):
