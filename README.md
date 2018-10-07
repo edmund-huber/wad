@@ -1,22 +1,19 @@
 wad
 =
 
-`wad` (Where's All the Development?) is a version control system with the goal
-of simplicity and predictability. The name is homage to [id Software's WAD file
+`wad` (Where's All the Development?) is a git-inspired version control system
+with integrated wiki, bug tracker, and code review.
+
+The name is homage to [id Software's WAD file
 format](https://en.wikipedia.org/wiki/Doom_WAD).
 
-Concepts:
-commits, tags, and head
-the changeset and ignoring files
-linear history
-restacking
+These are its goals:
+* wad is simple to use.
+* wad is simple to understand.
+* wad is everything you need to manage 90% of software projects.
+* wad is self-contained and has no dependencies other than Python 2.
 
-`wad list`
+Get started
+=
 
-`wad new list bla bla bla bla`
-
-`wad new commit bla bla bla bla`
-
-`wad jump <list or commit>`
-
-`wad restack <base`
+TODO, quick intro w/ init, commit, new topic, push, goto, new review, wiki, new issue, restack, push
