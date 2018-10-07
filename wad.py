@@ -46,10 +46,11 @@ def goto(reference):
             f.write(reference)
     except IOError:
         raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
-
 # TODO: multi-tenancy doesn't work.
 
-class WadObjectRegistry(type):
+
+# TODO: use metaclasses again to get rid of this duplicate?
+class WadObjectTypeRegistry(type):
 
     registry = []
 
@@ -63,13 +64,43 @@ class WadObjectRegistry(type):
         return cls.registry
 
 
-class WadObject(object):
+# TODO known WadObject subclasses (see Registry), should be automatically taken care of (e.g. .commit_ref)
 
-    def __init__(self, reference):
+
+class WadObjectRegistry(type):
+    registry = []
+
+    def __new__(cls, name, bases, attrs):
+        new_cls = type.__new__(cls, name, bases, attrs)
+        cls.registry.append(new_cls)
+        return new_cls
+
+    # TODO: replace with __iter__
+    @classmethod
+    def get(cls):
+        return cls.registry
+
+
+class WadObject(object):
+    __metaclass__ = WadObjectRegistry
+
+    def __init__(self, reference): # TODO see below: ref_or_id
         self._stage_dir_and_flock = None
-        self._reference = reference # TODO: sub_ref, because not canonical like commit/323342
         if reference is None:
+            self._reference = None
             self._set_up_stage()
+        else:
+            # If the reference is fully qualified, check that we are the right
+            # type of object.
+            splitted = reference.split('/')
+            if len(splitted) == 2:
+                if splitted[0] != type(self).__name__.lower():
+                    raise InternalError() # TODO
+                self._reference = splitted[1]
+            elif len(splitted) > 2:
+                raise InternalError() # TODO
+            else:
+                self._reference = reference # TODO verbiage: _id, because not a reference
 
     def __str__(self):
         s = type(self).__name__ + '('
@@ -86,11 +117,17 @@ class WadObject(object):
         return cls.__name__.lower() + '/'
 
     @classmethod
-    def look_up(cls, reference):
+    def look_up(cls, obj_or_ref):
+        if isinstance(obj_or_ref, WadObject):
+            ref = obj_or_ref.get_reference()
+        else:
+            ref = obj_or_ref
         for registered_cls in WadObjectRegistry.get():
+            if registered_cls == WadObject:
+                continue
             prefix = registered_cls.get_reference_prefix()
-            if reference.startswith(prefix):
-                return registered_cls(reference[len(prefix):])
+            if ref.startswith(prefix):
+                return registered_cls(ref[len(prefix):])
         return None
 
     def does_exist(self):
@@ -127,7 +164,7 @@ class WadObject(object):
                     stage_path = os.path.join(stage_dir, relative_path)
                     try:
                         os.makedirs(os.path.dirname(stage_path))
-                    except OSError: # TODO import path?
+                    except OSError: # TODO os.OSError?
                         # TODO it's silly that makedirs can fail if the directories exist already. replace?
                         pass
                     shutil.copy(path, stage_path)
@@ -156,36 +193,56 @@ class WadObject(object):
             return self._reference_dir()
 
     def get(self, attribute):
-        fn = os.path.join(self.object_dir(), attribute)
-        if os.path.isfile(fn):
-            with open(fn) as f:
-                return f.read()
+        # The object must exist.
+        object_dir_path = os.path.join(self.object_dir(), attribute)
+        if not os.path.isfile(object_dir_path):
+            return None
+        # An attribyte type might get the value from just the path..
+        attribute_type = self.find_matching_attribute_type(attribute)
+        value = attribute_type.get_from_path(object_dir_path)
+        if value is not None:
+            return value
+        # .. or it might want be fed the file contents.
+        with open(object_dir_path, 'rb') as f:
+            contents = f.read()
+        value = attribute_type.get_from_contents(contents)
+        if value is not None:
+            return value
         return None
 
+    def find_matching_attribute_type(self, attribute):
+        # Find the matching AttributeType class.
+        attribute_type_cls = None
+        # rename 'attribytetype' TODO
+        for cls in WadObjectTypeRegistry.get():
+            if attribute.endswith(cls.get_extension()):
+                if attribute_type_cls is not None:
+                    raise InternalError('more than one attribute type matches the extension: {}'.format(attribute)) # TODO
+                attribute_type_cls = cls
+        if attribute_type_cls is None:
+            raise Exception('no attribute type matches the extension: {}'.format(attribute)) # TODO InternalException
+        return attribute_type_cls
+
     def set(self, attribute, value=None, source_filename=None):
+        # Set up the stage and where we're going to store this object.
         self._set_up_stage()
         object_dir_path = os.path.join(self.object_dir(), attribute)
         try:
             os.makedirs(os.path.dirname(object_dir_path))
         except OSError:
             pass
+        # Figure out if, and how, we should be storing this value.
+        attribute_type = self.find_matching_attribute_type(attribute)
+        value, source_filename = attribute_type.set(value=value, source_filename=source_filename)
         if value is not None:
-            assert source_filename is None
-            if isinstance(value, str):
-                pass
-            elif isinstance(value, set) and all(isinstance(v, WadObject) for v in value):
-                sub_refs = [_object.get_reference() for _object in value]
-                sub_refs.sort()
-                value = '\n'.join(sub_refs)
-            else:
-                raise UnreachableException() # TODO
             with open(object_dir_path, 'w') as f:
                 f.write(value)
         elif source_filename is not None:
-            assert value is None
             # TODO, perf? maybe just put in a symlink now, and when unstaged,
             # symlink replaced with a copy of the file
             shutil.copy(source_filename, object_dir_path)
+        else:
+            raise InternalError() #TODO
 
     def store(self):
         # If there aren't staged changes, then there's nothing to do.
@@ -264,7 +321,7 @@ def get_head():
 def get_head_commit():
     obj = get_head()
     if isinstance(obj, Topic):
-        return WadObject.look_up('tip.commit_ref')
+        return obj.get('tip.commit_ref')
     elif isinstance(obj, Commit):
         return obj
     else:
@@ -276,29 +333,29 @@ def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argu
     if topic.does_exist():
         raise UsageException('Topic "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
-    topic.set('description.str', 'TODO')
+    topic.set('description.str', 'TODO - new topic')
     if starting_from_commit is None:
-        topic.set('tip.commit_ref', look_up_commit(get_head()))
+        topic.set('tip.commit_ref', get_head_commit())
     else:
-        topic.set('tip.commit_ref', starting_from_commit.get_reference())
+        topic.set('tip.commit_ref', starting_from_commit)
     topic.store()
     goto(topic.get_reference())
 
 
 class Entry(WadObject):
     __metaclass__ = WadObjectRegistry
-    _attributes = {'name', 'permissions'}
-    _optional_attributes = {'contents', 'entries'}
+    _attributes = {'name.str', 'permissions.str'}
+    _optional_attributes = {'contents.file', 'contents.entry_ref_set'}
     _autogen_reference = True
 
 
 def register_path(path):
     if os.path.isfile(path) or os.path.isdir(path): # TODO elif link..
         e = Entry(None)
-        e.set('name', os.path.basename(path))
-        e.set('permissions', 'TODO')
+        e.set('name.str', os.path.basename(path))
+        e.set('permissions.str', 'TODO')
         if os.path.isfile(path):
-            e.set('contents', source_filename=path)
+            e.set('contents.file', source_filename=path)
         elif os.path.isdir(path):
             entries = set()
             for entry in os.listdir(path):
@@ -306,7 +363,7 @@ def register_path(path):
                 if sub_path != './.wad': # TODO need to think about how/whether wad works if called out of current dir
                     _object = register_path(sub_path)
                     entries.add(_object)
-            e.set('entries', entries)
+            e.set('contents.entry_ref_set', entries)
         e.store()
         return e
     raise UnreachableException() #TODO
@@ -322,10 +379,10 @@ def command_init():
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
     init_commit = Commit(None)
-    init_commit.set('description', 'wad init')
+    init_commit.set('description.str', 'wad init')
     root = register_path('.')
     root.store()
-    init_commit.set('root', root.get_reference())
+    init_commit.set('root.entry_ref', root)
     init_commit.store()
     new_topic('main', starting_from_commit=init_commit)
 
@@ -351,8 +408,8 @@ def command_log():
     for _ in range(10):
         if not isinstance(commit, Commit):
             raise InternalException() # TODO
-        print '{}    {}'.format(commit.get_reference(), commit.get('description'))
-        parent = commit.get('parent')
+        print '{}    {}'.format(commit.get_reference(), commit.get('description.str'))
+        parent = commit.get('parent.commit_ref')
         if parent is None:
             break
         commit = WadObject.look_up(parent)
@@ -385,17 +442,17 @@ def command_new_commit(description):
     # Make a new commit starting from the head.
     head = get_head_commit()
     new_commit = Commit(None)
-    new_commit.set('description', description)
+    new_commit.set('description.str', description)
     root = register_path('.') # TODO should happen automatically on Commit()? (these 3 lines)
     root.store()
-    new_commit.set('parent', head.get_reference())
-    new_commit.set('root', root.get_reference())
+    new_commit.set('parent.commit_ref', head)
+    new_commit.set('root.entry_ref', root)
     new_commit.store()
     # TODO ^ this is all identical to part of new_topic
     # If the head is a topic, alter it.
     head = get_head()
     if isinstance(head, Topic):
-        head.set('head.commit_ref', new_commit)
+        head.set('tip.commit_ref', new_commit)
         head.store()
         goto(head.get_reference())
     elif isinstance(head, Commit):
@@ -410,9 +467,128 @@ def command_new_commit(description):
 # for author, need to read a ~/.wadconfig
 class Commit(WadObject):
     __metaclass__ = WadObjectRegistry
-    _attributes = {'description', 'root'}
-    _optional_attributes = {'parent'}
+    _attributes = {'description.str', 'root.entry_ref'}
+    _optional_attributes = {'parent.commit_ref'}
     _autogen_reference = True
+
+
+class StrType(object):
+    __metaclass__ = WadObjectTypeRegistry
+
+    @classmethod
+    def get_extension(cls):
+        return '.str'
+
+    @classmethod
+    def set(cls, value=None, source_filename=None):
+        if source_filename is not None:
+            raise InternalError() # TODO
+        if not isinstance(value, str):
+            raise InternalError() # TODO
+        # TODO.. check utf8 encoded?
+        return value, None
+
+    @classmethod
+    def get_from_path(cls, path):
+        return None
+
+    @classmethod
+    def get_from_contents(cls, contents):
+        return contents
+
+
+class RefType(object):
+
+    @classmethod
+    def get_extension(cls):
+        return '.' + cls._inner_type.__name__.lower() + '_ref'
+
+    @classmethod
+    def set(cls, value=None, source_filename=None):
+        if source_filename is not None:
+            raise InternalError() # TODO
+        if not issubclass(cls._inner_type, WadObject):
+            raise InternalError() # TODO
+        if not isinstance(value, cls._inner_type):
+            raise InternalError() # TODO
+        return value.get_reference(), None
+
+    @classmethod
+    def get_from_path(cls, path):
+        return None
+
+    @classmethod
+    def get_from_contents(cls, contents):
+        return cls._inner_type(contents)
+
+
+class CommitRefType(RefType):
+    __metaclass__ = WadObjectTypeRegistry
+    _inner_type = Commit
+
+
+class EntryRefType(RefType):
+    __metaclass__ = WadObjectTypeRegistry
+    _inner_type = Entry
+
+
+class FileType(object):
+    __metaclass__ = WadObjectTypeRegistry
+
+    @classmethod
+    def get_extension(cls):
+        return '.file'
+
+    @classmethod
+    def set(cls, value=None, source_filename=None):
+        if value is not None:
+            raise InternalError() # TODO
+        if source_filename is None:
+            raise InternalError() # TODO
+        return None, source_filename
+
+    @classmethod
+    def get_from_path(cls, path):
+        return None
+
+    @classmethod
+    def get_from_contents(cls, contents):
+        return cls._inner_type(contents)
+
+
+class RefSetType(object):
+
+    @classmethod
+    def get_extension(cls):
+        return '.' + cls._inner_type.__name__.lower() + '_ref_set'
+
+    @classmethod
+    def set(cls, value=None, source_filename=None):
+        if source_filename is not None:
+            raise InternalError() # TODO
+        if not issubclass(cls._inner_type, WadObject):
+            raise InternalError() # TODO
+        if not isinstance(value, set):
+            raise InternalError() # TODO
+        if not all(isinstance(v, cls._inner_type) for v in value):
+            raise InternalError() # TODO
+        sorted_ref_set = [v.get_reference() for v in value]
+        sorted_ref_set.sort()
+        value = '\n'.join(sorted_ref_set)
+        return value, None
+
+    @classmethod
+    def get_from_path(cls, path):
+        return None
+
+    @classmethod
+    def get_from_contents(cls, contents):
+        return [cls._inner_type(ref) for ref in contents.split('\n')]
+
+
+class EntryRefSetType(RefSetType):
+    __metaclass__ = WadObjectTypeRegistry
+    _inner_type = Entry
 
 
 def command_goto(reference):
@@ -431,14 +607,15 @@ command_fns = (
     (('status',), command_status, 'Shows the current topic, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
     (('topic',), command_topic, 'Lists all topic'),
-    (('new', 'topic'), command_new_topic, 'Creates a new topic and goes to it'),
-    (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'),
+    (('new', 'topic'), command_new_topic, 'Creates a new topic and goes to it'), # TODO check still working
+    (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'), # this next
     # TODO: need some way to do staging, i.e., 'commit only these files'
-    (('diff',), command_diff, 'Shows the diff'),
-    (('goto',), command_goto, 'Goes to the given reference'),
+    (('diff',), command_diff, 'Shows the diff'), # this shoudl also work
+    (('goto',), command_goto, 'Goes to the given reference'), # after new commit/diff, then this should work, will need to implement checking out of files
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
-    # TODO: add clean: looks for orphaned objects
+    # TODO: add clean: looks for orphaned objects and abandoned stages
     # TODO: add dump <reference>: loads up the reference and calls a WadObject type -specific .dump()
+    # TODO: reflog
 )
 
 
