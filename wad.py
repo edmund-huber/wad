@@ -84,6 +84,10 @@ class WadObjectRegistry(type):
 class WadObject(object):
     __metaclass__ = WadObjectRegistry
 
+    @classmethod
+    def _name(cls):
+        return cls.__name__.lower()
+
     def __init__(self, reference): # TODO see below: ref_or_id
         self._stage_dir_and_flock = None
         if reference is None:
@@ -94,7 +98,7 @@ class WadObject(object):
             # type of object.
             splitted = reference.split('/')
             if len(splitted) == 2:
-                if splitted[0] != type(self).__name__.lower():
+                if splitted[0] != self._name():
                     raise InternalError() # TODO
                 self._reference = splitted[1]
             elif len(splitted) > 2:
@@ -102,8 +106,14 @@ class WadObject(object):
             else:
                 self._reference = reference # TODO verbiage: _id, because not a reference
 
+    # TODO: make sure __ne__ properly defined, and so on
+    def __eq__(self, other):
+        return \
+            type(self) == type(other) and \
+            self._reference == other._reference
+
     def __str__(self):
-        s = type(self).__name__ + '('
+        s = self._name() + '('
         first = True
         for attribute in self._attributes | self._optional_attributes:
             if not first:
@@ -114,7 +124,12 @@ class WadObject(object):
 
     @classmethod
     def get_reference_prefix(cls):
-        return cls.__name__.lower() + '/'
+        return cls._name() + '/'
+
+    @classmethod
+    def iterate_all(cls):
+        for entry in os.listdir(cls._all_objects_dir()):
+            yield cls(entry)
 
     @classmethod
     def look_up(cls, obj_or_ref):
@@ -138,8 +153,12 @@ class WadObject(object):
             raise Exception('no reference assigned yet, did you store()?') # TODO internalexceptoin
         return type(self).get_reference_prefix() + self._reference
 
+    @classmethod
+    def _all_objects_dir(cls):
+        return os.path.join('.wad', cls._name())
+
     def _reference_dir(self):
-        return os.path.join('.wad', type(self).__name__.lower(), self._reference)
+        return os.path.join(self._all_objects_dir(), self._reference)
 
     def _set_up_stage(self):
         # If staging is already set up, then there's nothing to do.
@@ -147,7 +166,7 @@ class WadObject(object):
             return
         # Create a unique stage for the changes to this object, starting with a
         # copy of the object.
-        all_stages_dir = os.path.join('.wad', 'stage', type(self).__name__.lower())
+        all_stages_dir = os.path.join('.wad', 'stage', self._name())
         try:
             os.makedirs(all_stages_dir)
         except OSError:
@@ -197,12 +216,12 @@ class WadObject(object):
         object_dir_path = os.path.join(self.object_dir(), attribute)
         if not os.path.isfile(object_dir_path):
             return None
-        # An attribyte type might get the value from just the path..
+        # An attribute type might get the value from just the path..
         attribute_type = self.find_matching_attribute_type(attribute)
         value = attribute_type.get_from_path(object_dir_path)
         if value is not None:
             return value
-        # .. or it might want be fed the file contents.
+        # .. or it might want to be fed the file contents.
         with open(object_dir_path, 'rb') as f:
             contents = f.read()
         value = attribute_type.get_from_contents(contents)
@@ -213,7 +232,7 @@ class WadObject(object):
     def find_matching_attribute_type(self, attribute):
         # Find the matching AttributeType class.
         attribute_type_cls = None
-        # rename 'attribytetype' TODO
+        # rename 'attributetype' TODO
         for cls in WadObjectTypeRegistry.get():
             if attribute.endswith(cls.get_extension()):
                 if attribute_type_cls is not None:
@@ -421,12 +440,11 @@ def command_diff():
 
 def command_topic():
     check_is_wad_repository()
-    head_ref = get_head()
-    for topic_fn in glob.glob(os.path.join('.wad', 'T:*')):
-        topic_ref = os.path.basename(topic_fn)
+    head = get_head()
+    for topic in Topic.iterate_all():
         print '{} {}'.format(
-            '*' if topic_ref == head_ref else ' ',
-            topic_ref
+            '*' if topic == head else ' ',
+            topic.get('description.str')
         )
 
 
