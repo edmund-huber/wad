@@ -435,7 +435,63 @@ def command_log():
 
 
 def command_diff():
-    print 'diff' # TODO
+    root_entry = get_head_commit().get('root.entry_ref')
+    if root_entry.get('name.str') != '.':
+        raise InternalError() # TODO
+    diff_entry('.', root_entry)
+
+
+def diff_entry(path, entry):
+    print path
+
+    # TODO: if link?
+    if not os.path.exists(path):
+        path_type = None
+    elif os.path.isfile(path):
+        path_type = 'f'
+    elif os.path.isdir(path):
+        path_type = 'd'
+    else:
+        raise UnreachableException() # TODO
+
+    if entry is None:
+        entry_type = None
+    elif entry.get('contents.file') is not None:
+        entry_type = 'f'
+    elif entry.get('contents.entry_ref_set') is not None:
+        entry_type = 'd'
+    else:
+        raise UnreachableException() # TODO
+
+    if path_type is None and entry_type is not None:
+        print 'deleted: ' + path
+    elif path_type is not None and entry_type is None:
+        print 'added: ' + path
+    elif path_type != entry_type:
+        print 'file != directory: ' + path
+    elif path_type == 'f':
+        # TODO check permissions
+        # TODO check sha of file
+        print 'need to check file: ' + path
+    elif path_type == 'd':
+        # TODO check permissions
+        print 'need to check dir: ' + path
+        on_disk = set(os.listdir(path))
+        in_repo = {entry.get('name.str'): entry for entry in entry.get('contents.entry_ref_set')}
+        for name in on_disk | set(in_repo.keys()):
+            diff_entry(os.path.join(path, name), in_repo.get(name))
+    else:
+        raise UnreachableException() # TODO
+
+        #print os.path.exists(path)
+        #for name in on_disk - set(in_repo.keys()):
+        #    print 'on disk but not in repo: ' + os.path.join(path, name)
+        #    diff_entry(os.path.join(path, name), None)
+        #for name in set(in_repo.keys()) - on_disk:
+        #    print 'in repo but not on disk: ' + os.path.join(path, name)
+        #    diff_entry(None, in_repo[name])
+        #for name in on_disk & set(in_repo.keys()):
+        #    diff_entry(os.path.join(path, name), in_repo[name])
 
 
 def command_topic():
@@ -568,10 +624,11 @@ class FileType(object):
     @classmethod
     def get_from_path(cls, path):
         return None
+    # TODO instead of returning contents as below, return file object from path here?
 
     @classmethod
     def get_from_contents(cls, contents):
-        return cls._inner_type(contents)
+        return contents
 
 
 class RefSetType(object):
@@ -601,7 +658,11 @@ class RefSetType(object):
 
     @classmethod
     def get_from_contents(cls, contents):
-        return [cls._inner_type(ref) for ref in contents.split('\n')]
+        objs = []
+        for maybe_ref in contents.split('\n'):
+            if maybe_ref != '':
+                objs.append(cls._inner_type(maybe_ref))
+        return objs
 
 
 class EntryRefSetType(RefSetType):
