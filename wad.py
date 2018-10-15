@@ -364,8 +364,18 @@ def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argu
 class Entry(WadObject):
     __metaclass__ = WadObjectRegistry
     _attributes = {'name.str', 'permissions.str'}
-    _optional_attributes = {'contents.file', 'contents.entry_ref_set'}
+    _optional_attributes = {'contents.file', 'contents_file_hash.str', 'contents.entry_ref_set'}
     _autogen_reference = True
+
+
+def calculate_file_hash(path):
+    _hash = hashlib.sha1()
+    with open(path) as f:
+        for chunk in f.read(1000000):
+            if chunk == '':
+                break
+            _hash.update(chunk)
+    return _hash.hexdigest()
 
 
 def register_path(path):
@@ -375,6 +385,7 @@ def register_path(path):
         e.set('permissions.str', 'TODO')
         if os.path.isfile(path):
             e.set('contents.file', source_filename=path)
+            e.set('contents_file_hash.str', calculate_file_hash(path))
         elif os.path.isdir(path):
             entries = set()
             for entry in os.listdir(path):
@@ -488,8 +499,8 @@ def diff_entry(path, entry):
         # check permissions
         # check sha
         # sha differ? do diff
-        #yield ('check', path)
-        pass
+        if calculate_file_hash(path) != entry.get('contents_file_hash.str'):
+            yield ('modify', path)
     elif path_type == 'd' and entry_type == 'd':
         # check permissions
         #yield ('check', path)
