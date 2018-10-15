@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 import base64
+import difflib
 import fcntl
 import hashlib
 import inspect
@@ -499,7 +500,16 @@ def diff_entry(path, entry):
         # check permissions
         # check sha
         # sha differ? do diff
+        # TODO what if file is huge
         if calculate_file_hash(path) != entry.get('contents_file_hash.str'):
+            contents_lines = entry.get('contents.file').split('\n')
+            path_lines = [line.rstrip('\n') for line in open(path).readlines()]
+            #import pdb; pdb.set_trace()
+            #print contents_lines
+            #assert False
+            if path.endswith('aaa'):
+                for line in difflib.context_diff(contents_lines, path_lines):
+                    print line
             yield ('modify', path)
     elif path_type == 'd' and entry_type == 'd':
         # check permissions
