@@ -438,11 +438,14 @@ def command_diff():
     root_entry = get_head_commit().get('root.entry_ref')
     if root_entry.get('name.str') != '.':
         raise InternalError() # TODO
-    diff_entry('.', root_entry)
+    for value in diff_entry('.', root_entry):
+        print value
+
 
 
 def diff_entry(path, entry):
-    print path
+    if path == './.wad':
+        return
 
     # TODO: if link?
     if not os.path.exists(path):
@@ -463,35 +466,36 @@ def diff_entry(path, entry):
     else:
         raise UnreachableException() # TODO
 
-    if path_type is None and entry_type is not None:
-        print 'deleted: ' + path
-    elif path_type is not None and entry_type is None:
-        print 'added: ' + path
-    elif path_type != entry_type:
-        print 'file != directory: ' + path
-    elif path_type == 'f':
-        # TODO check permissions
-        # TODO check sha of file
-        print 'need to check file: ' + path
-    elif path_type == 'd':
-        # TODO check permissions
-        print 'need to check dir: ' + path
+    if path_type == 'd':
         on_disk = set(os.listdir(path))
+    else:
+        on_disk = set()
+    if entry_type == 'd':
         in_repo = {entry.get('name.str'): entry for entry in entry.get('contents.entry_ref_set')}
-        for name in on_disk | set(in_repo.keys()):
-            diff_entry(os.path.join(path, name), in_repo.get(name))
+    else:
+        in_repo = {}
+    for name in on_disk | set(in_repo.keys()):
+        for value in diff_entry(os.path.join(path, name), in_repo.get(name)):
+            yield value
+
+    if path_type is None and entry_type is not None:
+        yield ('delete', path)
+    elif path_type is not None and entry_type is None:
+        yield ('insert', path)
+    elif path_type != entry_type:
+        yield ('replace', path)
+    elif path_type == 'f' and entry_type == 'f':
+        # check permissions
+        # check sha
+        # sha differ? do diff
+        #yield ('check', path)
+        pass
+    elif path_type == 'd' and entry_type == 'd':
+        # check permissions
+        #yield ('check', path)
+        pass
     else:
         raise UnreachableException() # TODO
-
-        #print os.path.exists(path)
-        #for name in on_disk - set(in_repo.keys()):
-        #    print 'on disk but not in repo: ' + os.path.join(path, name)
-        #    diff_entry(os.path.join(path, name), None)
-        #for name in set(in_repo.keys()) - on_disk:
-        #    print 'in repo but not on disk: ' + os.path.join(path, name)
-        #    diff_entry(None, in_repo[name])
-        #for name in on_disk & set(in_repo.keys()):
-        #    diff_entry(os.path.join(path, name), in_repo[name])
 
 
 def command_topic():
