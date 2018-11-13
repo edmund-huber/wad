@@ -20,8 +20,10 @@ class UsageException(Exception):
 def command_help(*args):
     _, command_fn = find_matching_command(args)
     if len(args) > 0 and command_fn is None:
-        print 'No topic matching "{}".'.format(' '.join(args))
+        print 'No help topic matching "{}".'.format(' '.join(args))
     if command_fn is None:
+        print "\"where's all the development?\""
+        print
         print 'Available commands:'
         for command_prefix, command_fn, command_desc in command_fns:
             if command_desc is None:
@@ -34,6 +36,7 @@ def command_help(*args):
 
 
 def goto(reference):
+    # TODO check is a repo
     # The reference must not be broken.
     commit = WadObject.look_up(reference)
     # The repository must be clean. TODO
@@ -47,7 +50,6 @@ def goto(reference):
             f.write(reference)
     except IOError:
         raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
-# TODO: multi-tenancy doesn't work.
 
 
 # TODO: use metaclasses again to get rid of this duplicate?
@@ -507,7 +509,7 @@ def diff_entry(path, entry):
             #import pdb; pdb.set_trace()
             #print contents_lines
             #assert False
-            if path.endswith('aaa'):
+            if path.endswith('aaa'): # TODO aaa
                 for line in difflib.context_diff(contents_lines, path_lines):
                     print line
             yield ('modify', path)
@@ -710,16 +712,17 @@ command_fns = (
     (('init',), command_init, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current topic, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
-    (('topic',), command_topic, 'Lists all topic'),
+    (('topic',), command_topic, 'Lists all topics'),
     (('new', 'topic'), command_new_topic, 'Creates a new topic and goes to it'), # TODO check still working
     (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'), # this next
     # TODO: need some way to do staging, i.e., 'commit only these files'
     (('diff',), command_diff, 'Shows the diff'), # this shoudl also work
     (('goto',), command_goto, 'Goes to the given reference'), # after new commit/diff, then this should work, will need to implement checking out of files
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
-    # TODO: add clean: looks for orphaned objects and abandoned stages
     # TODO: add dump <reference>: loads up the reference and calls a WadObject type -specific .dump()
     # TODO: reflog
+    # TODO: stash
+    # TODO: grep
 )
 
 
@@ -762,5 +765,5 @@ elif len(command_args) < len(inspect_command_fn.args):
 elif len(command_args) > len(inspect_command_fn.args):
     # If more arguments are passed in than the function accepts, that's an
     # error.
-    raise Exception('blah blah')
+    raise Exception('blah blah') # TODO
 command_fn(*command_args)
