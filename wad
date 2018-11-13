@@ -708,7 +708,7 @@ def command_restack():
 
 
 command_fns = (
-    (('help',), command_help, None),
+    (('help',), command_help, '(You are reading it right now.)'),
     (('init',), command_init, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current topic, changes, etc'),
     (('log',), command_log, 'Lists commits from the head backwards'),
