@@ -435,7 +435,7 @@ def command_status():
     # TODO: changes
 
 
-def command_log():
+def command_commits():
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
     commit = WadObject.look_up(current_topic.get('tip.commit_ref'))
@@ -524,7 +524,7 @@ def diff_entry(path, entry):
         raise UnreachableException() # TODO
 
 
-def command_topic():
+def command_topics():
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
     for topic in Topic.iterate_all():
@@ -748,9 +748,9 @@ command_fns = (
     (('help',), command_help, '(You are reading it right now.)'),
     (('init',), command_init, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current topic, changes, etc'),
-    (('log',), command_log, 'Lists commits from the current topic in reverse chronological order'),
-    (('topic',), command_topic, 'Lists all topics'),
+    (('topics',), command_topics, 'Lists all topics'),
     (('new', 'topic'), command_new_topic, 'Creates a new topic from the current topic'),
+    (('commits',), command_commits, 'Lists commits from the current topic in reverse chronological order'),
     (('new', 'commit'), command_new_commit, 'Packages up the changes into a new commit in the current topic'),
     # TODO: need some way to do staging, i.e., 'commit only these files'
     (('diff',), command_diff, 'Shows the diff'), # this shoudl also work
