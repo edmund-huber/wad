@@ -409,12 +409,9 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    root = register_path('.')
-    root.store()
     init_commit = Commit(None)
     init_commit.set('author.str', 'just some guy') # TODO
     init_commit.set('description.str', 'wad init')
-    init_commit.set('root.entry_ref', root)
     init_commit.store()
     new_topic('main', starting_from_commit=init_commit)
 
@@ -546,10 +543,6 @@ def command_new_commit(description):
     check_have_wad()
     if description is None:
         raise Exception('"new commit" needs a description') # TODO: UsageException
-
-    root = register_path('.') # TODO should happen automatically on Commit()? (these 3 lines)
-    root.store()
-
     # Make a new commit, as a child of the tip of the topic.
     current_topic = CurrentTopic(None).get('the.topic_ref')
     tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
@@ -557,7 +550,6 @@ def command_new_commit(description):
     new_commit.set('description.str', description)
     new_commit.set('author.str', 'just some guy') # TODO
     new_commit.set('parent.commit_ref', tip)
-    new_commit.set('root.entry_ref', root)
     new_commit.store()
     # TODO ^ this is all identical to part of new_topic
     # Update the current topic.
@@ -568,10 +560,19 @@ def command_new_commit(description):
 # TODO: author
 # for author, need to read a ~/.wadconfig
 class Commit(WadObject):
+
     __metaclass__ = WadObjectRegistry
     _attributes = {'description.str', 'root.entry_ref', 'author.str'}
     _optional_attributes = {'parent.commit_ref'}
     _reference_type = ReferenceType.CONTENTS_HASH
+
+    def __init__(self, *args, **kwargs):
+        super(Commit, self).__init__(*args, **kwargs)
+        # When a Commit is created, it automatically adds the working directory
+        # to itself.
+        root = register_path('.')
+        root.store()
+        self.set('root.entry_ref', root)
 
 
 class SnakeType(object):
@@ -800,5 +801,5 @@ elif len(command_args) < len(inspect_command_fn.args):
 elif len(command_args) > len(inspect_command_fn.args):
     # If more arguments are passed in than the function accepts, that's an
     # error.
-    raise Exception('blah blah') # TODO
+    raise Exception('got {} expected {}'.format(len(command_args), len(inspect_command_fn.args))) # TODO
 command_fn(*command_args)
