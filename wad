@@ -10,8 +10,6 @@ import shutil
 import sys
 import tempfile
 
-# TODO: pepwhatever, pyflakes
-
 
 class UsageException(Exception):
     pass
@@ -40,10 +38,7 @@ def goto(topic_reference):
     # The topic must exist.
     topic = WadObject.look_up(topic_reference)
     if topic is None:
-        raise UsageException() # TODO
-    # The repository must be clean. TODO
-    #if len(diff()) > 0:
-    #    raise UsageException("Can't goto when there are un-committed or stashed changes.")
+        raise UsageException()
     # TODO check out the actual files.
     # Store the new current_topic.
     current_topic = CurrentTopic(None)
