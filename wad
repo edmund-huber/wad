@@ -35,21 +35,20 @@ def command_help(*args):
         print command_fn.__doc__
 
 
-def goto(reference):
-    # TODO check is a repo
-    # The reference must not be broken.
-    commit = WadObject.look_up(reference)
+def goto(topic_reference):
+    check_have_wad()
+    # The topic must exist.
+    topic = WadObject.look_up(topic_reference)
+    if topic is None:
+        raise UsageException() # TODO
     # The repository must be clean. TODO
     #if len(diff()) > 0:
     #    raise UsageException("Can't goto when there are un-committed or stashed changes.")
     # TODO check out the actual files.
-    # Store the new head.
-    head_fn = os.path.join('.wad', 'head')
-    try:
-        with open(head_fn, 'w') as f:
-            f.write(reference)
-    except IOError:
-        raise UsageException("Broken repository - {} can't be written to!".format(head_fn))
+    # Store the new current_topic.
+    current_topic = CurrentTopic(None)
+    current_topic.set('the.topic_ref', topic)
+    current_topic.store()
 
 
 # TODO: use metaclasses again to get rid of this duplicate?
@@ -69,7 +68,7 @@ class WadObjectTypeRegistry(type):
 
 # TODO known WadObject subclasses (see Registry), should be automatically taken care of (e.g. .commit_ref)
 
-
+# This class 
 class WadObjectRegistry(type):
     registry = []
 
@@ -84,6 +83,12 @@ class WadObjectRegistry(type):
         return cls.registry
 
 
+class ReferenceType(object):
+    CONTENTS_HASH = 0
+    SELF_DETERMINED = 1
+    SINGLETON = 2
+
+
 class WadObject(object):
     __metaclass__ = WadObjectRegistry
 
@@ -95,7 +100,7 @@ class WadObject(object):
         self._stage_dir_and_flock = None
         if reference is None:
             self._reference = None
-            self._set_up_stage()
+            # self._set_up_stage() # TODO
         else:
             # If the reference is fully qualified, check that we are the right
             # type of object.
@@ -136,7 +141,7 @@ class WadObject(object):
 
     @classmethod
     def look_up(cls, obj_or_ref):
-        if isinstance(obj_or_ref, WadObject):
+        if isinstance(obj_or_ref, WadObject): # TODO when is this relevant
             ref = obj_or_ref.get_reference()
         else:
             ref = obj_or_ref
@@ -145,13 +150,14 @@ class WadObject(object):
                 continue
             prefix = registered_cls.get_reference_prefix()
             if ref.startswith(prefix):
-                return registered_cls(ref[len(prefix):])
-        return None
+                maybe_obj = registered_cls(ref[len(prefix):])
+                if os.path.exists(maybe_obj._reference_dir()):
+                    return maybe_obj
+                else:
+                    return None
+        raise InternalError() # TODO: if get here, it means that a reference didn't have a recognizable class
 
-    def does_exist(self):
-        return self._reference is None
-
-    def get_reference(self): # TODO all reference -> ref, all object -> obj, only one head, topics have starting_commit
+    def get_reference(self):
         if self._reference is None:
             raise Exception('no reference assigned yet, did you store()?') # TODO internalexceptoin
         return type(self).get_reference_prefix() + self._reference
@@ -161,7 +167,10 @@ class WadObject(object):
         return os.path.join('.wad', cls._name())
 
     def _reference_dir(self):
-        return os.path.join(self._all_objects_dir(), self._reference)
+        if self._reference_type == ReferenceType.SINGLETON:
+            return self._all_objects_dir()
+        else:
+            return os.path.join(self._all_objects_dir(), self._reference)
 
     def _set_up_stage(self):
         # If staging is already set up, then there's nothing to do.
@@ -211,7 +220,6 @@ class WadObject(object):
             stage_dir, _ = self._stage_dir_and_flock
             return stage_dir
         else:
-            assert self._reference is not None
             return self._reference_dir()
 
     def get(self, attribute):
@@ -287,7 +295,7 @@ class WadObject(object):
         # If this WadObject type is supposed to autogenerate its reference,
         # then generate the reference from the sha1 of everything in the staged
         # directory.
-        if self._autogen_reference:
+        if self._reference_type == ReferenceType.CONTENTS_HASH:
             paths = []
             for dirpath, dirnames, filenames in os.walk(self.object_dir()):
                 for fn in filenames:
@@ -302,7 +310,6 @@ class WadObject(object):
                             break
                         _hash.update('!chunk!' + base64.b64encode(chunk))
             self._reference = _hash.hexdigest()
-        assert self._reference is not None
         # Then move the stage directory over to the right place.
         if os.path.exists(self._reference_dir()):
             shutil.rmtree(self._reference_dir())
@@ -324,40 +331,31 @@ class Topic(WadObject):
     __metaclass__ = WadObjectRegistry
     _attributes = {'description.str', 'tip.commit_ref'}
     _optional_attributes = set()
-    _autogen_reference = False
+    _reference_type = ReferenceType.SELF_DETERMINED
 
 
-def get_head():
-    head_fn = os.path.join('.wad', 'head')
-    try:
-        with open(head_fn) as f:
-            (head,) = f.readlines()
-    except IOError:
-        raise UsageException('Broken repository - {} does not exist!'.format(head_fn))
-    obj = WadObject.look_up(head)
-    if not isinstance(obj, Topic) and not isinstance(obj, Commit):
-        raise InternalError('{} is not a valid head.'.format(obj))
-    return obj
+class CurrentTopic(WadObject):
+    __metaclass__ = WadObjectRegistry
+    _attributes = {'the.topic_ref'}
+    _optional_attributes = set()
+    _reference_type = ReferenceType.SINGLETON
 
 
-def get_head_commit():
-    obj = get_head()
-    if isinstance(obj, Topic):
-        return obj.get('tip.commit_ref')
-    elif isinstance(obj, Commit):
-        return obj
-    else:
-        raise UnreachablException() #TODO
+# TODO: do everything in transactions. not a point to the 'stage' if topic.store() and goto() are not part of one transaction
 
 
-def new_topic(name, starting_from_commit=None): # TODO: and 'starting from' argument
-    topic = Topic(name)
-    if topic.does_exist():
+def new_topic(name, starting_from_commit=None):
+    reference = 'topic/{}'.format(name) # TODO reuse code that builds the refrence
+    topic = WadObject.look_up(reference)
+    if topic is not None:
         raise UsageException('Topic "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
+    topic = Topic(name)
     topic.set('description.str', 'TODO - new topic')
     if starting_from_commit is None:
-        topic.set('tip.commit_ref', get_head_commit())
+        current_topic = CurrentTopic(None).get('the.topic_ref')
+        tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+        topic.set('tip.commit_ref', tip)
     else:
         topic.set('tip.commit_ref', starting_from_commit)
     topic.store()
@@ -368,7 +366,7 @@ class Entry(WadObject):
     __metaclass__ = WadObjectRegistry
     _attributes = {'name.str', 'permissions.str'}
     _optional_attributes = {'contents.file', 'contents_file_hash.str', 'contents.entry_ref_set'}
-    _autogen_reference = True
+    _reference_type = ReferenceType.CONTENTS_HASH
 
 
 def calculate_file_hash(path):
@@ -411,16 +409,17 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    init_commit = Commit(None)
-    init_commit.set('description.str', 'wad init')
     root = register_path('.')
     root.store()
+    init_commit = Commit(None)
+    init_commit.set('author.str', 'just some guy') # TODO
+    init_commit.set('description.str', 'wad init')
     init_commit.set('root.entry_ref', root)
     init_commit.store()
     new_topic('main', starting_from_commit=init_commit)
 
 
-def check_is_wad_repository():
+def check_have_wad():
     if not os.path.exists('.wad'):
         raise UsageException('Directory {} is not a wad. Try `wad init`.'.format(os.path.abspath('.')))
 
@@ -428,16 +427,21 @@ def check_is_wad_repository():
 def command_status():
     """wad status
 
-    Shows the head, changes, etc.
+    Shows the current topic, changes, etc.
     """
-    check_is_wad_repository()
-    print 'head: {}'.format(get_head().get_reference())
+    check_have_wad()
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    print 'topic: {}'.format(current_topic.get_reference())
+    print 'topic description: {}'.format(current_topic.get('description.str'))
+    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    print 'latest commit: {}'.format(tip.get('description.str'))
+    # TODO: changes
 
 
-# TODO all look_up_commit -> WadObject.look_up
 def command_log():
-    check_is_wad_repository()
-    commit = get_head_commit()
+    check_have_wad()
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    commit = WadObject.look_up(current_topic.get('tip.commit_ref'))
     for _ in range(10):
         if not isinstance(commit, Commit):
             raise InternalException() # TODO
@@ -449,7 +453,9 @@ def command_log():
 
 
 def command_diff():
-    root_entry = get_head_commit().get('root.entry_ref')
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    root_entry = tip.get('root.entry_ref')
     if root_entry.get('name.str') != '.':
         raise InternalError() # TODO
     for value in diff_entry('.', root_entry):
@@ -522,55 +528,76 @@ def diff_entry(path, entry):
 
 
 def command_topic():
-    check_is_wad_repository()
-    head = get_head()
+    check_have_wad()
+    current_topic = CurrentTopic(None).get('the.topic_ref')
     for topic in Topic.iterate_all():
-        print '{} {}'.format(
-            '*' if topic == head else ' ',
+        print '{}  {}  "{}"'.format(
+            '*' if topic == current_topic else ' ',
+            topic.get_reference(),
             topic.get('description.str')
         )
 
 
-def command_new_topic(reference): # TODO optional: starting_from
-    if reference is None:
-        raise UsageException('"new topic" needs a reference') # TODO: UsageException
-    new_topic(reference)
+def command_new_topic(name):
+    new_topic(name)
 
 
 def command_new_commit(description):
+    check_have_wad()
     if description is None:
         raise Exception('"new commit" needs a description') # TODO: UsageException
-    # Make a new commit starting from the head.
-    head = get_head_commit()
-    new_commit = Commit(None)
-    new_commit.set('description.str', description)
+
     root = register_path('.') # TODO should happen automatically on Commit()? (these 3 lines)
     root.store()
-    new_commit.set('parent.commit_ref', head)
+
+    # Make a new commit, as a child of the tip of the topic.
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    new_commit = Commit(None)
+    new_commit.set('description.str', description)
+    new_commit.set('author.str', 'just some guy') # TODO
+    new_commit.set('parent.commit_ref', tip)
     new_commit.set('root.entry_ref', root)
     new_commit.store()
     # TODO ^ this is all identical to part of new_topic
-    # If the head is a topic, alter it.
-    head = get_head()
-    if isinstance(head, Topic):
-        head.set('tip.commit_ref', new_commit)
-        head.store()
-        goto(head.get_reference())
-    elif isinstance(head, Commit):
-        # If we're in detached mode, the new head is just whatever we finished
-        # committing.
-        goto(new_commit.get_reference())
-    else:
-        raise UnreachableException()
+    # Update the current topic.
+    current_topic.set('tip.commit_ref', new_commit)
+    current_topic.store()
 
 
 # TODO: author
 # for author, need to read a ~/.wadconfig
 class Commit(WadObject):
     __metaclass__ = WadObjectRegistry
-    _attributes = {'description.str', 'root.entry_ref'}
+    _attributes = {'description.str', 'root.entry_ref', 'author.str'}
     _optional_attributes = {'parent.commit_ref'}
-    _autogen_reference = True
+    _reference_type = ReferenceType.CONTENTS_HASH
+
+
+class SnakeType(object):
+    __metaclass__ = WadObjectTypeRegistry
+
+    @classmethod
+    def get_extension(cls):
+        return '.snake'
+
+    @classmethod
+    def set(cls, value=None, source_filename=None):
+        if source_filename is not None:
+            raise InternalError() # TODO
+        if not isinstance(value, str):
+            raise InternalError() # TODO .. usageerror
+        if re.search(r'[^0-9a-z_]', 'blah_ddd__ ') is not None:
+            raise UsageError()
+        return value, None
+
+    @classmethod
+    def get_from_path(cls, path):
+        return None
+
+    @classmethod
+    def get_from_contents(cls, contents):
+        return contents
 
 
 class StrType(object):
@@ -621,6 +648,11 @@ class RefType(object):
     @classmethod
     def get_from_contents(cls, contents):
         return cls._inner_type(contents)
+
+
+class TopicRefType(RefType):
+    __metaclass__ = WadObjectTypeRegistry
+    _inner_type = Topic
 
 
 class CommitRefType(RefType):
@@ -707,18 +739,23 @@ def command_restack():
     pass # TODO
 
 
+def command_reset():
+    pass # TODO
+
+
 command_fns = (
     (('help',), command_help, '(You are reading it right now.)'),
     (('init',), command_init, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current topic, changes, etc'),
-    (('log',), command_log, 'Lists commits from the head backwards'),
+    (('log',), command_log, 'Lists commits from the current topic in reverse chronological order'),
     (('topic',), command_topic, 'Lists all topics'),
-    (('new', 'topic'), command_new_topic, 'Creates a new topic and goes to it'), # TODO check still working
-    (('new', 'commit'), command_new_commit, 'Creates a new commit on top of head using the diff'), # this next
+    (('new', 'topic'), command_new_topic, 'Creates a new topic from the current topic'),
+    (('new', 'commit'), command_new_commit, 'Packages up the changes into a new commit in the current topic'),
     # TODO: need some way to do staging, i.e., 'commit only these files'
     (('diff',), command_diff, 'Shows the diff'), # this shoudl also work
     (('goto',), command_goto, 'Goes to the given reference'), # after new commit/diff, then this should work, will need to implement checking out of files
-    (('restack',), command_restack, 'Change the parent of the given commit to a different commit')
+    (('restack',), command_restack, 'Change the parent of the given commit to a different commit'),
+    (('reset',), command_reset, 'Undoes the changes from the last commit')
     # TODO: add dump <reference>: loads up the reference and calls a WadObject type -specific .dump()
     # TODO: reflog
     # TODO: stash
@@ -746,8 +783,6 @@ command_prefix, command_fn = find_matching_command(sys.argv[1:])
 # If we can't find the command that the user asked for, or there's no command,
 # then show `wad help`.
 if command_prefix is None:
-    # And we're not interested in `help` showing the topic related to whatever
-    # is on the command line.
     command_prefix = tuple(sys.argv[1:])
     command_fn = command_help
 
