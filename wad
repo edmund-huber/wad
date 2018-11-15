@@ -23,10 +23,13 @@ def command_help(*args):
         print "\"where's all the development?\""
         print
         print 'Available commands:'
+        min_width = 0
+        for command_prefix, _, _ in command_fns:
+            min_width = max(min_width, len(' '.join(command_prefix)))
         for command_prefix, command_fn, command_desc in command_fns:
             if command_desc is None:
                 command_desc = '(no description available)'
-            print '    {} - {}'.format(' '.join(command_prefix), command_desc)
+            print '    {} - {}'.format(' '.join(command_prefix).rjust(min_width), command_desc)
     elif command_fn.__doc__ is None:
         print 'No help available for "{}".'.format(' '.join(args))
     else:
