@@ -395,8 +395,8 @@ def register_path(path):
     raise UnreachableException() #TODO
 
 
-def command_init():
-    """wad init
+def command_up():
+    """wad up
 
     Creates a wad in the current directory.
     """
@@ -404,16 +404,16 @@ def command_init():
         os.mkdir('.wad')
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
-    init_commit = Commit(None)
-    init_commit.set('author.str', 'just some guy') # TODO
-    init_commit.set('description.str', 'wad init')
-    init_commit.store()
-    new_topic('main', starting_from_commit=init_commit)
+    first_commit = Commit(None)
+    first_commit.set('author.str', 'just some guy') # TODO
+    first_commit.set('description.str', 'wad up')
+    first_commit.store()
+    new_topic('main', starting_from_commit=first_commit)
 
 
 def check_have_wad():
     if not os.path.exists('.wad'):
-        raise UsageException('Directory {} is not a wad. Try `wad init`.'.format(os.path.abspath('.')))
+        raise UsageException('Directory {} is not a wad. Try `wad up`.'.format(os.path.abspath('.')))
 
 
 def command_status():
@@ -741,7 +741,7 @@ def command_reset():
 
 command_fns = (
     (('help',), command_help, '(You are reading it right now.)'),
-    (('init',), command_init, 'Creates a wad in the current directory'),
+    (('up',), command_up, 'Creates a wad in the current directory'),
     (('status',), command_status, 'Shows the current topic, changes, etc'),
     (('topics',), command_topics, 'Lists all topics'),
     (('new', 'topic'), command_new_topic, 'Creates a new topic from the current topic'),
