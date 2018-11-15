@@ -36,17 +36,15 @@ def command_help(*args):
 def goto(topic_reference):
     check_have_wad()
     # The topic must exist.
-    topic = WadObject.look_up(topic_reference)
+    topic = Topic(topic_reference)
     if topic is None:
         raise UsageException()
-    # TODO check out the actual files.
     # Store the new current_topic.
     current_topic = CurrentTopic(None)
     current_topic.set('the.topic_ref', topic)
     current_topic.store()
 
 
-# TODO: use metaclasses again to get rid of this duplicate?
 class WadObjectTypeRegistry(type):
 
     registry = []
@@ -61,9 +59,6 @@ class WadObjectTypeRegistry(type):
         return cls.registry
 
 
-# TODO known WadObject subclasses (see Registry), should be automatically taken care of (e.g. .commit_ref)
-
-# This class 
 class WadObjectRegistry(type):
     registry = []
 
@@ -72,7 +67,6 @@ class WadObjectRegistry(type):
         cls.registry.append(new_cls)
         return new_cls
 
-    # TODO: replace with __iter__
     @classmethod
     def get(cls):
         return cls.registry
@@ -91,25 +85,23 @@ class WadObject(object):
     def _name(cls):
         return cls.__name__.lower()
 
-    def __init__(self, reference): # TODO see below: ref_or_id
+    def __init__(self, reference):
         self._stage_dir_and_flock = None
         if reference is None:
             self._reference = None
-            # self._set_up_stage() # TODO
         else:
             # If the reference is fully qualified, check that we are the right
             # type of object.
             splitted = reference.split('/')
             if len(splitted) == 2:
                 if splitted[0] != self._name():
-                    raise InternalError() # TODO
+                    raise InternalError()
                 self._reference = splitted[1]
             elif len(splitted) > 2:
-                raise InternalError() # TODO
+                raise InternalError()
             else:
-                self._reference = reference # TODO verbiage: _id, because not a reference
+                self._reference = reference
 
-    # TODO: make sure __ne__ properly defined, and so on
     def __eq__(self, other):
         return \
             type(self) == type(other) and \
@@ -133,24 +125,6 @@ class WadObject(object):
     def iterate_all(cls):
         for entry in os.listdir(cls._all_objects_dir()):
             yield cls(entry)
-
-    @classmethod
-    def look_up(cls, obj_or_ref):
-        if isinstance(obj_or_ref, WadObject): # TODO when is this relevant
-            ref = obj_or_ref.get_reference()
-        else:
-            ref = obj_or_ref
-        for registered_cls in WadObjectRegistry.get():
-            if registered_cls == WadObject:
-                continue
-            prefix = registered_cls.get_reference_prefix()
-            if ref.startswith(prefix):
-                maybe_obj = registered_cls(ref[len(prefix):])
-                if os.path.exists(maybe_obj._reference_dir()):
-                    return maybe_obj
-                else:
-                    return None
-        raise InternalError() # TODO: if get here, it means that a reference didn't have a recognizable class
 
     def get_reference(self):
         if self._reference is None:
@@ -217,18 +191,26 @@ class WadObject(object):
         else:
             return self._reference_dir()
 
+    def exists(self):
+        return os.path.isdir(self.object_dir())
+
     def get(self, attribute):
         # The object must exist.
-        object_dir_path = os.path.join(self.object_dir(), attribute)
-        if not os.path.isfile(object_dir_path):
+        if not self.exists():
+          raise InternalError()
+        # But the attribute might not, if it's optional.
+        attrib_path = os.path.join(self.object_dir(), attribute)
+        if not os.path.isfile(attrib_path):
+            if attribute not in self._optional_attributes:
+                raise InternalError()
             return None
         # An attribute type might get the value from just the path..
         attribute_type = self.find_matching_attribute_type(attribute)
-        value = attribute_type.get_from_path(object_dir_path)
+        value = attribute_type.get_from_path(attrib_path)
         if value is not None:
             return value
         # .. or it might want to be fed the file contents.
-        with open(object_dir_path, 'rb') as f:
+        with open(attrib_path, 'rb') as f:
             contents = f.read()
         value = attribute_type.get_from_contents(contents)
         if value is not None:
@@ -341,15 +323,16 @@ class CurrentTopic(WadObject):
 
 def new_topic(name, starting_from_commit=None):
     reference = 'topic/{}'.format(name) # TODO reuse code that builds the refrence
-    topic = WadObject.look_up(reference)
-    if topic is not None:
+    # TODO can't have spaces..
+    topic = Topic(reference)
+    if topic.exists():
         raise UsageException('Topic "{}" already exists.'.format(name))
     # TODO name must be a-z and underscores
     topic = Topic(name)
     topic.set('description.str', 'TODO - new topic')
     if starting_from_commit is None:
         current_topic = CurrentTopic(None).get('the.topic_ref')
-        tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+        tip = current_topic.get('tip.commit_ref')
         topic.set('tip.commit_ref', tip)
     else:
         topic.set('tip.commit_ref', starting_from_commit)
@@ -425,7 +408,7 @@ def command_status():
     current_topic = CurrentTopic(None).get('the.topic_ref')
     print 'topic: {}'.format(current_topic.get_reference())
     print 'topic description: {}'.format(current_topic.get('description.str'))
-    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    tip = current_topic.get('tip.commit_ref')
     print 'latest commit: {}'.format(tip.get('description.str'))
     # TODO: changes
 
@@ -433,20 +416,19 @@ def command_status():
 def command_commits():
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
-    commit = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    commit = current_topic.get('tip.commit_ref')
     for _ in range(10):
         if not isinstance(commit, Commit):
             raise InternalException() # TODO
         print '{}    {}'.format(commit.get_reference(), commit.get('description.str'))
-        parent = commit.get('parent.commit_ref')
-        if parent is None:
+        commit = commit.get('parent.commit_ref')
+        if commit is None:
             break
-        commit = WadObject.look_up(parent)
 
 
 def command_diff():
     current_topic = CurrentTopic(None).get('the.topic_ref')
-    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    tip = current_topic.get('tip.commit_ref')
     root_entry = tip.get('root.entry_ref')
     if root_entry.get('name.str') != '.':
         raise InternalError() # TODO
@@ -507,7 +489,7 @@ def diff_entry(path, entry):
             #import pdb; pdb.set_trace()
             #print contents_lines
             #assert False
-            if path.endswith('aaa'): # TODO aaa
+            if path.endswith('aaa'): # TODO aaaa
                 for line in difflib.context_diff(contents_lines, path_lines):
                     print line
             yield ('modify', path)
@@ -540,7 +522,7 @@ def command_new_commit(description):
         raise Exception('"new commit" needs a description') # TODO: UsageException
     # Make a new commit, as a child of the tip of the topic.
     current_topic = CurrentTopic(None).get('the.topic_ref')
-    tip = WadObject.look_up(current_topic.get('tip.commit_ref'))
+    tip = current_topic.get('tip.commit_ref')
     new_commit = Commit(None)
     new_commit.set('description.str', description)
     new_commit.set('author.str', 'just some guy') # TODO
@@ -739,6 +721,7 @@ def command_reset():
     pass # TODO
 
 
+# TODO organize by topic -- other, topic, commit
 command_fns = (
     (('help',), command_help, '(You are reading it right now.)'),
     (('up',), command_up, 'Creates a wad in the current directory'),
