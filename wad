@@ -196,7 +196,7 @@ class WadObject(object):
     def get(self, attribute):
         # The object must exist.
         if not self.exists():
-          raise InternalError()
+            raise InternalError()
         # But the attribute might not, if it's optional.
         attrib_path = os.path.join(self.object_dir(), attribute)
         if not os.path.isfile(attrib_path):
@@ -426,7 +426,6 @@ def command_diff():
         print value
 
 
-
 def diff_entry(path, entry):
     if path == './.wad':
         return
@@ -480,7 +479,7 @@ def diff_entry(path, entry):
             yield ('modify', path)
     elif path_type == 'd' and entry_type == 'd':
         # check permissions
-        #yield ('check', path)
+        # yield ('check', path)
         pass
     else:
         raise UnreachableException()
@@ -710,8 +709,8 @@ command_fns = (
     (('new', 'topic'), command_new_topic, 'Creates a new topic from the current topic'),
     (('commits',), command_commits, 'Lists commits from the current topic in reverse chronological order'),
     (('new', 'commit'), command_new_commit, 'Packages up the changes into a new commit in the current topic'),
-    (('diff',), command_diff, 'Shows the diff'), # this shoudl also work
-    (('goto',), command_goto, 'Goes to the given reference'), # after new commit/diff, then this should work, will need to implement checking out of files
+    (('diff',), command_diff, 'Shows the diff'),
+    (('goto',), command_goto, 'Goes to the given reference'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit'),
     (('reset',), command_reset, 'Undoes the changes from the last commit')
 )

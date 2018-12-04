@@ -1,1 +1,1 @@
-pep8==1.7.1
+pycodestyle==2.4.0
