@@ -9,8 +9,20 @@ import re
 import shutil
 import sys
 import tempfile
+import traceback
 
 
+# An exception that indicates something wrong in wad itself.
+class InternalException(Exception):
+    pass
+
+
+# A special case of InternalException.
+class UnreachableException(InternalException):
+    pass
+
+
+# An exception that indicates something wrong with the user input.
 class UsageException(Exception):
     pass
 
@@ -42,6 +54,7 @@ def goto(topic_reference):
     topic = Topic(topic_reference)
     if topic is None:
         raise UsageException()
+        # TODO: this needs a string.
     # Store the new current_topic.
     current_topic = CurrentTopic(None)
     current_topic.set('the.topic_ref', topic)
@@ -98,10 +111,10 @@ class WadObject(object):
             splitted = reference.split('/')
             if len(splitted) == 2:
                 if splitted[0] != self._name():
-                    raise InternalError()
+                    raise InternalException()
                 self._reference = splitted[1]
             elif len(splitted) > 2:
-                raise InternalError()
+                raise InternalException()
             else:
                 self._reference = reference
 
@@ -179,7 +192,7 @@ class WadObject(object):
         try:
             fcntl.flock(flock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError:
-            raise UnreachableError('{} is locked.'.format(lock_filename))
+            raise UnreachableException('{} is locked.'.format(lock_filename))
         else:
             self._stage_dir_and_flock = (stage_dir, flock)
 
@@ -196,12 +209,12 @@ class WadObject(object):
     def get(self, attribute):
         # The object must exist.
         if not self.exists():
-            raise InternalError()
+            raise InternalException()
         # But the attribute might not, if it's optional.
         attrib_path = os.path.join(self.object_dir(), attribute)
         if not os.path.isfile(attrib_path):
             if attribute not in self._optional_attributes:
-                raise InternalError()
+                raise InternalException()
             return None
         # An attribute type might get the value from just the path..
         attribute_type = self.find_matching_attribute_type(attribute)
@@ -222,7 +235,7 @@ class WadObject(object):
         for cls in WadObjectTypeRegistry.get():
             if attribute.endswith(cls.get_extension()):
                 if attribute_type_cls is not None:
-                    raise InternalError('more than one attribute type matches the extension: {}'.format(attribute))
+                    raise InternalException('more than one attribute type matches the extension: {}'.format(attribute))
                 attribute_type_cls = cls
         if attribute_type_cls is None:
             raise Exception('no attribute type matches the extension: {}'.format(attribute))
@@ -245,7 +258,7 @@ class WadObject(object):
         elif source_filename is not None:
             shutil.copy(source_filename, object_dir_path)
         else:
-            raise InternalError()
+            raise InternalException()
 
     def store(self):
         # If there aren't staged changes, then there's nothing to do.
@@ -421,7 +434,7 @@ def command_diff():
     tip = current_topic.get('tip.commit_ref')
     root_entry = tip.get('root.entry_ref')
     if root_entry.get('name.str') != '.':
-        raise InternalError()
+        raise InternalException()
     for value in diff_entry('.', root_entry):
         print value
 
@@ -544,11 +557,11 @@ class SnakeType(object):
     @classmethod
     def set(cls, value=None, source_filename=None):
         if source_filename is not None:
-            raise InternalError()
+            raise InternalException()
         if not isinstance(value, str):
-            raise InternalError()
+            raise InternalException()
         if re.search(r'[^0-9a-z_]', 'blah_ddd__ ') is not None:
-            raise UsageError()
+            raise UsageException()
         return value, None
 
     @classmethod
@@ -570,9 +583,9 @@ class StrType(object):
     @classmethod
     def set(cls, value=None, source_filename=None):
         if source_filename is not None:
-            raise InternalError()
+            raise InternalException()
         if not isinstance(value, str):
-            raise InternalError()
+            raise InternalException()
         return value, None
 
     @classmethod
@@ -593,11 +606,11 @@ class RefType(object):
     @classmethod
     def set(cls, value=None, source_filename=None):
         if source_filename is not None:
-            raise InternalError()
+            raise InternalException()
         if not issubclass(cls._inner_type, WadObject):
-            raise InternalError()
+            raise InternalException()
         if not isinstance(value, cls._inner_type):
-            raise InternalError()
+            raise InternalException()
         return value.get_reference(), None
 
     @classmethod
@@ -634,9 +647,9 @@ class FileType(object):
     @classmethod
     def set(cls, value=None, source_filename=None):
         if value is not None:
-            raise InternalError()
+            raise InternalException()
         if source_filename is None:
-            raise InternalError()
+            raise InternalException()
         return None, source_filename
 
     @classmethod
@@ -657,13 +670,13 @@ class RefSetType(object):
     @classmethod
     def set(cls, value=None, source_filename=None):
         if source_filename is not None:
-            raise InternalError()
+            raise InternalException()
         if not issubclass(cls._inner_type, WadObject):
-            raise InternalError()
+            raise InternalException()
         if not isinstance(value, set):
-            raise InternalError()
+            raise InternalException()
         if not all(isinstance(v, cls._inner_type) for v in value):
-            raise InternalError()
+            raise InternalException()
         sorted_ref_set = [v.get_reference() for v in value]
         sorted_ref_set.sort()
         value = '\n'.join(sorted_ref_set)
@@ -724,7 +737,7 @@ def find_matching_command(inp):
             # If there's more than one matching command prefix, then we screwed
             # up.
             if command_prefix is not None:
-                raise InternalError()
+                raise InternalException()
             command_prefix = prefix
             command_fn = fn
     return command_prefix, command_fn
@@ -738,6 +751,14 @@ command_prefix, command_fn = find_matching_command(sys.argv[1:])
 if command_prefix is None:
     command_prefix = tuple(sys.argv[1:])
     command_fn = command_help
+
+
+def handle_internal_exception(formatted_tb):
+    print 'Internal error!\n'
+    print formatted_tb
+    print '\nPlease open an issue: https://github.com/edmund-huber/wad/issues/new'
+    sys.exit(1)
+
 
 # Call the command with the arguments passed in on the command line.
 command_args = sys.argv[1 + len(command_prefix):]
@@ -754,4 +775,14 @@ elif len(command_args) > len(inspect_command_fn.args):
     # If more arguments are passed in than the function accepts, that's an
     # error.
     raise Exception('got {} expected {}'.format(len(command_args), len(inspect_command_fn.args)))
-command_fn(*command_args)
+try:
+    command_fn(*command_args)
+except InternalException as e:
+    handle_internal_exception(traceback.format_exc())
+except UsageException as e:
+    print 'Usage error:'
+    msg = str(e)
+    if msg == '':
+        handle_internal_exception(traceback.format_exc())
+    else:
+        sys.exit(1)
