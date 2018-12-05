@@ -52,9 +52,8 @@ def goto(topic_reference):
     check_have_wad()
     # The topic must exist.
     topic = Topic(topic_reference)
-    if topic is None:
-        raise UsageException()
-        # TODO: this needs a string.
+    if not topic.exists():
+        raise UsageException("The topic {} doesn't exist.".format(topic_reference))
     # Store the new current_topic.
     current_topic = CurrentTopic(None)
     current_topic.set('the.topic_ref', topic)
@@ -780,9 +779,9 @@ try:
 except InternalException as e:
     handle_internal_exception(traceback.format_exc())
 except UsageException as e:
-    print 'Usage error:'
     msg = str(e)
     if msg == '':
         handle_internal_exception(traceback.format_exc())
     else:
+        print 'Usage error: {}'.format(msg)
         sys.exit(1)
