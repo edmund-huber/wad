@@ -53,7 +53,7 @@ def goto(topic_reference):
     # The topic must exist.
     topic = Topic(topic_reference)
     if not topic.exists():
-        raise UsageException("The topic {} doesn't exist.".format(topic_reference))
+        raise UsageException("the topic \"{}\" doesn't exist.".format(topic_reference))
     # Store the new current_topic.
     current_topic = CurrentTopic(None)
     current_topic.set('the.topic_ref', topic)
@@ -118,7 +118,7 @@ class WadObject(object):
             # If requested, check that this is a valid reference name.
             if self._reference_type == ReferenceType.SELF_DETERMINED \
                 and not re.search(r'^[a-z0-9_]+$', self._reference):
-                    raise UsageException("'{}' is not a valid reference name.".format(self._reference))
+                    raise UsageException('"{}" is not a valid reference name.'.format(self._reference))
 
     def __eq__(self, other):
         return \
@@ -146,7 +146,7 @@ class WadObject(object):
 
     def get_reference(self):
         if self._reference is None:
-            raise Exception('no reference assigned yet, did you store()?')
+            raise InternalException()
         return type(self).get_reference_prefix() + self._reference
 
     @classmethod
@@ -212,6 +212,9 @@ class WadObject(object):
         # The object must exist.
         if not self.exists():
             raise InternalException()
+        # The attribute must exist.
+        if attribute not in self._attributes | self._optional_attributes:
+            raise InternalException()
         # But the attribute might not, if it's optional.
         attrib_path = os.path.join(self.object_dir(), attribute)
         if not os.path.isfile(attrib_path):
@@ -237,10 +240,10 @@ class WadObject(object):
         for cls in WadObjectTypeRegistry.get():
             if attribute.endswith(cls.get_extension()):
                 if attribute_type_cls is not None:
-                    raise InternalException('more than one attribute type matches the extension: {}'.format(attribute))
+                    raise InternalException()
                 attribute_type_cls = cls
         if attribute_type_cls is None:
-            raise Exception('no attribute type matches the extension: {}'.format(attribute))
+            raise InternalException()
         return attribute_type_cls
 
     def set(self, attribute, value=None, source_filename=None):
@@ -276,10 +279,10 @@ class WadObject(object):
             for fn in filenames:
                 attributes.add(unroot_path(os.path.join(dirpath, fn), stage_dir))
         if not attributes.issuperset(self._attributes):
-            raise Exception('{}, {}'.format(attributes, self._attributes))
+            raise InternalException()
         superset = self._attributes | self._optional_attributes
         if not attributes.issubset(superset):
-            raise Exception('{}, {}'.format(attributes, superset))
+            raise InternalException()
         # If this WadObject type is supposed to autogenerate its reference,
         # then generate the reference from the sha1 of everything in the staged
         # directory.
@@ -328,7 +331,7 @@ class CurrentTopic(WadObject):
 def new_topic(name, starting_from_commit=None):
     topic = Topic(name)
     if topic.exists():
-        raise UsageException('Topic "{}" already exists.'.format(name))
+        raise UsageException('topic "{}" already exists.'.format(name))
     topic.set('description.str', 'TODO - new topic')
     if starting_from_commit is None:
         current_topic = CurrentTopic(None).get('the.topic_ref')
@@ -366,7 +369,7 @@ def command_up():
     try:
         os.mkdir('.wad')
     except OSError:
-        raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
+        raise UsageException('directory {} is already a wad.'.format(os.path.abspath('.')))
     first_commit = Commit(None)
     first_commit.register_path('.')
     first_commit.set('author.str', 'just some guy')
@@ -377,7 +380,7 @@ def command_up():
 
 def check_have_wad():
     if not os.path.exists('.wad'):
-        raise UsageException('Directory {} is not a wad. Try `wad up`.'.format(os.path.abspath('.')))
+        raise UsageException('directory {} is not a wad. Try `wad up`.'.format(os.path.abspath('.')))
 
 
 def command_status():
@@ -493,7 +496,7 @@ def command_new_topic(name):
 def command_new_commit(description):
     check_have_wad()
     if description is None:
-        raise Exception('"new commit" needs a description')
+        raise InternalException()
     # Make a new commit, as a child of the tip of the topic.
     current_topic = CurrentTopic(None).get('the.topic_ref')
     tip = current_topic.get('tip.commit_ref')
@@ -728,22 +731,22 @@ def handle_internal_exception(formatted_tb):
     sys.exit(1)
 
 
-# Call the command with the arguments passed in on the command line.
-command_args = sys.argv[1 + len(command_prefix):]
-inspect_command_fn = inspect.getargspec(command_fn)
-if inspect_command_fn.varargs is not None:
-    # A function with 'varargs' can handle any number of parameters.
-    pass
-elif len(command_args) < len(inspect_command_fn.args):
-    # Otherwise, we should substitute None for all the arguments missing from
-    # the command line.
-    missing_args = len(inspect_command_fn.args) - len(command_args)
-    command_args.extend([None] * missing_args)
-elif len(command_args) > len(inspect_command_fn.args):
-    # If more arguments are passed in than the function accepts, that's an
-    # error.
-    raise Exception('got {} expected {}'.format(len(command_args), len(inspect_command_fn.args)))
 try:
+    # Call the command with the arguments passed in on the command line.
+    command_args = sys.argv[1 + len(command_prefix):]
+    inspect_command_fn = inspect.getargspec(command_fn)
+    if inspect_command_fn.varargs is not None:
+        # A function with 'varargs' can handle any number of parameters.
+        pass
+    elif len(command_args) < len(inspect_command_fn.args):
+        # Otherwise, we should substitute None for all the arguments missing from
+        # the command line.
+        missing_args = len(inspect_command_fn.args) - len(command_args)
+        command_args.extend([None] * missing_args)
+    elif len(command_args) > len(inspect_command_fn.args):
+        # If more arguments are passed in than the function accepts, that's an
+        # error.
+        raise UsageException('too many arguments.')
     command_fn(*command_args)
 except InternalException as e:
     handle_internal_exception(traceback.format_exc())
