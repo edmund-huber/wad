@@ -105,10 +105,9 @@ class WadObject(object):
         if reference is None:
             self._reference = None
         else:
-            # If the reference is fully qualified, check that we are the right
-            # type of object.
             splitted = reference.split('/')
             if len(splitted) == 2:
+                # If fully qualified, check that we are the right type of object,
                 if splitted[0] != self._name():
                     raise InternalException()
                 self._reference = splitted[1]
@@ -116,6 +115,10 @@ class WadObject(object):
                 raise InternalException()
             else:
                 self._reference = reference
+            # If requested, check that this is a valid reference name.
+            if self._reference_type == ReferenceType.SELF_DETERMINED \
+                and not re.search(r'^[a-z0-9_]+$', self._reference):
+                    raise UsageException("'{}' is not a valid reference name.".format(self._reference))
 
     def __eq__(self, other):
         return \
@@ -323,11 +326,9 @@ class CurrentTopic(WadObject):
 
 
 def new_topic(name, starting_from_commit=None):
-    reference = 'topic/{}'.format(name)
-    topic = Topic(reference)
+    topic = Topic(name)
     if topic.exists():
         raise UsageException('Topic "{}" already exists.'.format(name))
-    topic = Topic(name)
     topic.set('description.str', 'TODO - new topic')
     if starting_from_commit is None:
         current_topic = CurrentTopic(None).get('the.topic_ref')
@@ -538,32 +539,6 @@ class Commit(WadObject):
             e.store()
             return e
         raise UnreachableException()
-
-
-class SnakeType(object):
-    __metaclass__ = WadObjectTypeRegistry
-
-    @classmethod
-    def get_extension(cls):
-        return '.snake'
-
-    @classmethod
-    def set(cls, value=None, source_filename=None):
-        if source_filename is not None:
-            raise InternalException()
-        if not isinstance(value, str):
-            raise InternalException()
-        if re.search(r'[^0-9a-z_]', 'blah_ddd__ ') is not None:
-            raise UsageException()
-        return value, None
-
-    @classmethod
-    def get_from_path(cls, path):
-        return None
-
-    @classmethod
-    def get_from_contents(cls, contents):
-        return contents
 
 
 class StrType(object):
