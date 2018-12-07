@@ -515,9 +515,6 @@ class Commit(WadObject):
     _optional_attributes = {'parent.commit_ref'}
     _reference_type = ReferenceType.CONTENTS_HASH
 
-    def __init__(self, *args, **kwargs):
-        super(Commit, self).__init__(*args, **kwargs)
-
     def register_path(self, path):
         root = self._register_sub_path('.')
         self.set('root.entry_ref', root)
