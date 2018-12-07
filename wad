@@ -367,6 +367,7 @@ def command_up():
     except OSError:
         raise UsageException('Directory {} is already a wad.'.format(os.path.abspath('.')))
     first_commit = Commit(None)
+    first_commit.register_path('.')
     first_commit.set('author.str', 'just some guy')
     first_commit.set('description.str', 'wad up')
     first_commit.store()
@@ -496,6 +497,7 @@ def command_new_commit(description):
     current_topic = CurrentTopic(None).get('the.topic_ref')
     tip = current_topic.get('tip.commit_ref')
     new_commit = Commit(None)
+    new_commit.register_path('.')
     new_commit.set('description.str', description)
     new_commit.set('author.str', 'just some guy')
     new_commit.set('parent.commit_ref', tip)
@@ -515,12 +517,12 @@ class Commit(WadObject):
 
     def __init__(self, *args, **kwargs):
         super(Commit, self).__init__(*args, **kwargs)
-        # When a Commit is created, it automatically adds the working directory
-        # to itself.
-        root = self._register_path('.')
+
+    def register_path(self, path):
+        root = self._register_sub_path('.')
         self.set('root.entry_ref', root)
 
-    def _register_path(self, path):
+    def _register_sub_path(self, path):
         if os.path.isfile(path) or os.path.isdir(path):
             e = Entry(None)
             e.set('name.str', os.path.basename(path))
@@ -533,7 +535,7 @@ class Commit(WadObject):
                 for entry in os.listdir(path):
                     sub_path = os.path.join(path, entry)
                     if sub_path != './.wad':
-                        _object = self._register_path(sub_path)
+                        _object = self._register_sub_path(sub_path)
                         entries.add(_object)
                 e.set('contents.entry_ref_set', entries)
             e.store()
