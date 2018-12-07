@@ -288,12 +288,8 @@ class WadObject(object):
             paths.sort()
             _hash = hashlib.sha1()
             for path in paths:
-                _hash.update('!path!' + base64.b64encode(unroot_path(path, stage_dir)))
-                with open(path) as f:
-                    for chunk in f.read(1000000):
-                        if chunk == '':
-                            break
-                        _hash.update('!chunk!' + base64.b64encode(chunk))
+                _hash.update('\x30path\x30' + base64.b64encode(unroot_path(path, stage_dir)))
+                _hash.update('\x30hash\x30' + base64.b64encode(calculate_file_hash(path)))
             self._reference = _hash.hexdigest()
         # Then move the stage directory over to the right place.
         if os.path.exists(self._reference_dir()):
@@ -352,33 +348,13 @@ class Entry(WadObject):
 
 def calculate_file_hash(path):
     _hash = hashlib.sha1()
-    with open(path) as f:
-        for chunk in f.read(1000000):
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(1000000)
             if chunk == '':
                 break
             _hash.update(chunk)
     return _hash.hexdigest()
-
-
-def register_path(path):
-    if os.path.isfile(path) or os.path.isdir(path):
-        e = Entry(None)
-        e.set('name.str', os.path.basename(path))
-        e.set('permissions.str', 'TODO')
-        if os.path.isfile(path):
-            e.set('contents.file', source_filename=path)
-            e.set('contents_file_hash.str', calculate_file_hash(path))
-        elif os.path.isdir(path):
-            entries = set()
-            for entry in os.listdir(path):
-                sub_path = os.path.join(path, entry)
-                if sub_path != './.wad':
-                    _object = register_path(sub_path)
-                    entries.add(_object)
-            e.set('contents.entry_ref_set', entries)
-        e.store()
-        return e
-    raise UnreachableException()
 
 
 def command_up():
@@ -541,9 +517,28 @@ class Commit(WadObject):
         super(Commit, self).__init__(*args, **kwargs)
         # When a Commit is created, it automatically adds the working directory
         # to itself.
-        root = register_path('.')
-        root.store()
+        root = self._register_path('.')
         self.set('root.entry_ref', root)
+
+    def _register_path(self, path):
+        if os.path.isfile(path) or os.path.isdir(path):
+            e = Entry(None)
+            e.set('name.str', os.path.basename(path))
+            e.set('permissions.str', 'TODO')
+            if os.path.isfile(path):
+                e.set('contents.file', source_filename=path)
+                e.set('contents_file_hash.str', calculate_file_hash(path))
+            elif os.path.isdir(path):
+                entries = set()
+                for entry in os.listdir(path):
+                    sub_path = os.path.join(path, entry)
+                    if sub_path != './.wad':
+                        _object = self._register_path(sub_path)
+                        entries.add(_object)
+                e.set('contents.entry_ref_set', entries)
+            e.store()
+            return e
+        raise UnreachableException()
 
 
 class SnakeType(object):
