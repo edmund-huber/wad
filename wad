@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 import base64
+import collections
 import difflib
 import fcntl
 import hashlib
@@ -329,6 +330,7 @@ class CurrentTopic(WadObject):
 
 
 def new_topic(name, starting_from_commit=None):
+    check_have_wad()
     topic = Topic(name)
     if topic.exists():
         raise UsageException('topic "{}" already exists.'.format(name))
@@ -386,16 +388,29 @@ def check_have_wad():
 def command_status():
     """wad status
 
-    Shows the current topic, changes, etc.
+    Shows the current topic, changes to be committed, etc.
     """
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
-    print 'topic: {}'.format(current_topic.get_reference())
-    print 'topic description: {}'.format(current_topic.get('description.str'))
+    print '{} "{}"'.format(current_topic.get_reference(), current_topic.get('description.str'))
     tip = current_topic.get('tip.commit_ref')
     print 'latest commit: {}'.format(tip.get('description.str'))
+    root_entry = tip.get('root.entry_ref')
+    if root_entry.get('name.str') != '.':
+        raise InternalException()
+    grouped_changes = collections.defaultdict(list)
+    for verb, path, context in diff_repo_to_current('.', root_entry):
+        grouped_changes[verb].append(path)
+    for verb in ['delete', 'create', 'replace', 'modify']:
+        if grouped_changes[verb]:
+            print '%s (%i)' % (verb, len(grouped_changes[verb]))
+            for path in grouped_changes[verb]:
+                print '    %s' % path
+    if not any(grouped_changes.values()):
+        print 'No changes.'
 
 
+# TODO: list oldest thing first, newest thing last
 def command_commits():
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
@@ -415,11 +430,11 @@ def command_diff():
     root_entry = tip.get('root.entry_ref')
     if root_entry.get('name.str') != '.':
         raise InternalException()
-    for value in diff_entry('.', root_entry):
+    for value in diff_repo_to_current('.', root_entry):
         print value
 
 
-def diff_entry(path, entry):
+def diff_repo_to_current(path, entry):
     if path == './.wad':
         return
 
@@ -450,15 +465,15 @@ def diff_entry(path, entry):
     else:
         in_repo = {}
     for name in on_disk | set(in_repo.keys()):
-        for value in diff_entry(os.path.join(path, name), in_repo.get(name)):
+        for value in diff_repo_to_current(os.path.join(path, name), in_repo.get(name)):
             yield value
 
     if path_type is None and entry_type is not None:
-        yield ('delete', path)
+        yield ('delete', path, None)
     elif path_type is not None and entry_type is None:
-        yield ('insert', path)
+        yield ('create', path, None)
     elif path_type != entry_type:
-        yield ('replace', path)
+        yield ('replace', path, None)
     elif path_type == 'f' and entry_type == 'f':
         # check permissions
         # check sha
@@ -467,9 +482,8 @@ def diff_entry(path, entry):
         if calculate_file_hash(path) != entry.get('contents_file_hash.str'):
             contents_lines = entry.get('contents.file').split('\n')
             path_lines = [line.rstrip('\n') for line in open(path).readlines()]
-            for line in difflib.context_diff(contents_lines, path_lines):
-                print line
-            yield ('modify', path)
+            diff = difflib.context_diff(contents_lines, path_lines)
+            yield ('modify', path, ''.join(diff))
     elif path_type == 'd' and entry_type == 'd':
         # check permissions
         # yield ('check', path)
@@ -678,11 +692,11 @@ def command_goto(reference):
 
 
 def command_restack():
-    pass
+    check_have_wad()
 
 
 def command_reset():
-    pass
+    check_have_wad()
 
 
 command_fns = (
@@ -693,11 +707,15 @@ command_fns = (
     (('new', 'topic'), command_new_topic, 'Creates a new topic from the current topic'),
     (('commits',), command_commits, 'Lists commits from the current topic in reverse chronological order'),
     (('new', 'commit'), command_new_commit, 'Packages up the changes into a new commit in the current topic'),
+    # TODO: this needs to handle 'blah blah' as well as it supports '"blah blah"'
     (('diff',), command_diff, 'Shows the diff'),
+    # TODO doesn't make sense to have both diff and status commands, if status will show the diff too.
     (('goto',), command_goto, 'Goes to the given reference'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit'),
     (('reset',), command_reset, 'Undoes the changes from the last commit')
+    # TODO: ^ not sure i get it.
 )
+# TODO: 'commits' should show committer, date, description, files new/changed/moved/deleted
 
 
 def find_matching_command(inp):
@@ -714,46 +732,58 @@ def find_matching_command(inp):
     return command_prefix, command_fn
 
 
-# Find the command corresponding to the command line arguments.
-command_prefix, command_fn = find_matching_command(sys.argv[1:])
-
-# If we can't find the command that the user asked for, or there's no command,
-# then show `wad help`.
-if command_prefix is None:
-    command_prefix = tuple(sys.argv[1:])
-    command_fn = command_help
+class WadError(Exception):
+    pass
 
 
+# TODO: WadError should not include exceptions that arise from failed assertions
 def handle_internal_exception(formatted_tb):
     print 'Internal error!\n'
     print formatted_tb
     print '\nPlease open an issue: https://github.com/edmund-huber/wad/issues/new'
-    sys.exit(1)
+    raise WadError()
 
 
-try:
-    # Call the command with the arguments passed in on the command line.
-    command_args = sys.argv[1 + len(command_prefix):]
-    inspect_command_fn = inspect.getargspec(command_fn)
-    if inspect_command_fn.varargs is not None:
-        # A function with 'varargs' can handle any number of parameters.
-        pass
-    elif len(command_args) < len(inspect_command_fn.args):
-        # Otherwise, we should substitute None for all the arguments missing from
-        # the command line.
-        missing_args = len(inspect_command_fn.args) - len(command_args)
-        command_args.extend([None] * missing_args)
-    elif len(command_args) > len(inspect_command_fn.args):
-        # If more arguments are passed in than the function accepts, that's an
-        # error.
-        raise UsageException('too many arguments.')
-    command_fn(*command_args)
-except InternalException as e:
-    handle_internal_exception(traceback.format_exc())
-except UsageException as e:
-    msg = str(e)
-    if msg == '':
+def wad_main(arguments):
+    # Find the command corresponding to the command line arguments.
+    command_prefix, command_fn = find_matching_command(arguments)
+
+    # If we can't find the command that the user asked for, or there's no
+    # command, then show `wad help`.
+    if command_prefix is None:
+        command_prefix = arguments
+        command_fn = command_help
+
+    try:
+        # Call the command with the arguments passed in on the command line.
+        command_args = list(arguments[len(command_prefix):])
+        inspect_command_fn = inspect.getargspec(command_fn)
+        if inspect_command_fn.varargs is not None:
+            # A function with 'varargs' can handle any number of parameters.
+            pass
+        elif len(command_args) < len(inspect_command_fn.args):
+            # Otherwise, we should substitute None for all the arguments missing from
+            # the command line.
+            missing_args = len(inspect_command_fn.args) - len(command_args)
+            command_args.extend([None] * missing_args)
+        elif len(command_args) > len(inspect_command_fn.args):
+            # If more arguments are passed in than the function accepts, that's an
+            # error.
+            raise UsageException('too many arguments.')
+        command_fn(*command_args)
+    except InternalException as e:
         handle_internal_exception(traceback.format_exc())
-    else:
-        print 'Usage error: {}'.format(msg)
+    except UsageException as e:
+        msg = str(e)
+        if msg == '':
+            handle_internal_exception(traceback.format_exc())
+        else:
+            print 'Usage error: {}'.format(msg)
+            raise WadError()
+
+
+if __name__ == '__main__':
+    try:
+        wad_main(sys.argv[1:])
+    except WadError:
         sys.exit(1)
