@@ -162,5 +162,16 @@ class TestWadCommit(WadTestCase):
         )
 
 
+class TestWadNewTopic(WadTestCase):
+    """
+    'new topic' should fail if there are any uncommitted changes in the tree.
+    """
+    def test(self):
+        self.wad('up')
+        with open('new_file', 'w') as f:
+            f.write('a')
+        self.wad('new', 'topic', 'test', error=True)
+
+
 if __name__ == '__main__':
     main()

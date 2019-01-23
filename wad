@@ -383,6 +383,15 @@ def check_have_wad():
         raise UsageException('directory {} is not a wad. Try `wad up`.'.format(os.path.abspath('.')))
 
 
+def get_changes():
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    tip = current_topic.get('tip.commit_ref')
+    root_entry = tip.get('root.entry_ref')
+    if root_entry.get('name.str') != '.':
+        raise InternalException()
+    return diff_repo_to_current('.', root_entry)
+
+
 def command_status():
     """wad status
 
@@ -393,11 +402,8 @@ def command_status():
     print '{} "{}"'.format(current_topic.get_reference(), current_topic.get('description.str'))
     tip = current_topic.get('tip.commit_ref')
     print 'latest commit: {}'.format(tip.get('description.str'))
-    root_entry = tip.get('root.entry_ref')
-    if root_entry.get('name.str') != '.':
-        raise InternalException()
     grouped_changes = collections.defaultdict(list)
-    for verb, path, context in diff_repo_to_current('.', root_entry):
+    for verb, path, context in get_changes():
         grouped_changes[verb].append(path)
     for verb in ['delete', 'create', 'replace', 'modify']:
         if grouped_changes[verb]:
@@ -503,7 +509,16 @@ def command_topics():
 
 
 def command_new_topic(name):
+    """wad new topic
+
+    Creates a new topic, starting from the latest change.
+    """
     check_have_wad()
+    try:
+        get_changes().next()
+        raise UsageException('There are changes, you must commit or reset first.')
+    except StopIteration:
+        pass
     new_topic(name)
 
 
