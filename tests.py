@@ -79,22 +79,38 @@ class TestWadUpFailsWhenWadExists(WadTestCase):
         self.wad('up', error=True)
 
 
-# If .wad doesn't exist, then all commands except for `help` and `up` should
-# fail.
-class TestOtherCommandsNeedAWadMeta(type):
+class TestAllCommandsMeta(type):
     def __new__(cls, name, bases, _dict):
         def gen_test(command):
             def test(self):
-                self.wad(*command, error=True)
+                _dict['meta_test_fn'](self, *command)
             return test
         for command_tup, _, _ in command_fns:
             command = ' '.join(command_tup)
-            if command not in ['help', 'up']:
-                test_name = 'test_other_commands_need_a_wad_%s' % command.replace(' ', '_')
+            if command not in _dict['meta_exclude_commands']:
+                test_name = 'test_%s' % command.replace(' ', '_')
                 _dict[test_name] = gen_test(command.split(' '))
         return type.__new__(cls, name, bases, _dict)
-class TestOtherCommandsNeedAWad(WadTestCase):
-    __metaclass__ = TestOtherCommandsNeedAWadMeta
+
+
+# If .wad doesn't exist, then all commands except for `help` and `up` should
+# fail.
+def check_command_fails_if_no_wad_directory(self, *command):
+    self.wad(*command, error=True)
+class TestAllCommandsNeedAWad(WadTestCase):
+    __metaclass__ = TestAllCommandsMeta
+    meta_exclude_commands = ['help', 'up']
+    meta_test_fn = check_command_fails_if_no_wad_directory
+
+
+# All commands must have a 'help' entry.
+def check_command_has_help(self, *command):
+    help_command = ('help',) + command
+    self.wad(*help_command)
+class TestAllCommandsMustHaveHelp(WadTestCase):
+    __metaclass__ = TestAllCommandsMeta
+    meta_exclude_commands = []
+    meta_test_fn = check_command_has_help
 
 
 class TestWadStatus(WadTestCase):

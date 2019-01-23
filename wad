@@ -29,11 +29,17 @@ class UsageException(Exception):
 
 
 def command_help(*args):
+    """wad help <command>
+
+    Get help on a command.
+    """
     _, command_fn = find_matching_command(args)
-    if len(args) > 0 and command_fn is None:
-        print 'No help topic matching "{}".'.format(' '.join(args))
     if command_fn is None:
-        print "\"where's all the development?\""
+        # If we can't find the given command, print the 'help' screen.
+        if len(args) > 0:
+            print 'No help topic matching "{}".'.format(' '.join(args))
+        else:
+            print "\"where's all the development?\""
         print
         print 'Available commands:'
         min_width = 0
@@ -44,7 +50,8 @@ def command_help(*args):
                 command_desc = '(no description available)'
             print '    {} - {}'.format(' '.join(command_prefix).rjust(min_width), command_desc)
     elif command_fn.__doc__ is None:
-        print 'No help available for "{}".'.format(' '.join(args))
+        # All commands must have help.
+        raise UnreachableException()
     else:
         print command_fn.__doc__
 
@@ -414,8 +421,12 @@ def command_status():
         print 'No changes.'
 
 
-# TODO: list oldest thing first, newest thing last
 def command_commits():
+    """
+    wad commits
+
+    Lists all changes from newest to oldest.
+    """
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
     commit = current_topic.get('tip.commit_ref')
@@ -426,17 +437,6 @@ def command_commits():
         commit = commit.get('parent.commit_ref')
         if commit is None:
             break
-
-
-def command_diff():
-    check_have_wad()
-    current_topic = CurrentTopic(None).get('the.topic_ref')
-    tip = current_topic.get('tip.commit_ref')
-    root_entry = tip.get('root.entry_ref')
-    if root_entry.get('name.str') != '.':
-        raise InternalException()
-    for value in diff_repo_to_current('.', root_entry):
-        print value
 
 
 def diff_repo_to_current(path, entry):
@@ -498,6 +498,8 @@ def diff_repo_to_current(path, entry):
 
 
 def command_topics():
+    """
+    """
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
     for topic in Topic.iterate_all():
@@ -523,6 +525,10 @@ def command_new_topic(name):
 
 
 def command_new_commit(description):
+    """wad new commit
+
+    Creates a new commit with the changes that can be seen with `wad status`.
+    """
     check_have_wad()
     if description is None:
         raise InternalException()
@@ -701,6 +707,10 @@ class EntryRefSetType(RefSetType):
 
 
 def command_goto(reference):
+    """wad goto
+
+    Switch to a different topic.
+    """
     check_have_wad()
     if reference is None:
         raise UsageException('"goto" needs a reference')
@@ -708,10 +718,18 @@ def command_goto(reference):
 
 
 def command_restack():
+    """wad restack
+
+    Change the parent of the given commit to a different commit.
+    """
     check_have_wad()
 
 
 def command_reset():
+    """wad reset
+
+    Undo all changes.
+    """
     check_have_wad()
 
 
@@ -724,9 +742,7 @@ command_fns = (
     (('commits',), command_commits, 'Lists commits from the current topic in reverse chronological order'),
     (('new', 'commit'), command_new_commit, 'Packages up the changes into a new commit in the current topic'),
     # TODO: this needs to handle 'blah blah' as well as it supports '"blah blah"'
-    (('diff',), command_diff, 'Shows the diff'),
-    # TODO doesn't make sense to have both diff and status commands, if status will show the diff too.
-    (('goto',), command_goto, 'Goes to the given reference'),
+    (('goto',), command_goto, 'Switch to a different topic'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit'),
     (('reset',), command_reset, 'Undoes the changes from the last commit')
     # TODO: ^ not sure i get it.
