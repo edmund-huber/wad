@@ -50,7 +50,6 @@ def command_help(*args):
 
 
 def goto(topic_reference):
-    check_have_wad()
     # The topic must exist.
     topic = Topic(topic_reference)
     if not topic.exists():
@@ -330,7 +329,6 @@ class CurrentTopic(WadObject):
 
 
 def new_topic(name, starting_from_commit=None):
-    check_have_wad()
     topic = Topic(name)
     if topic.exists():
         raise UsageException('topic "{}" already exists.'.format(name))
@@ -425,6 +423,7 @@ def command_commits():
 
 
 def command_diff():
+    check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
     tip = current_topic.get('tip.commit_ref')
     root_entry = tip.get('root.entry_ref')
@@ -504,6 +503,7 @@ def command_topics():
 
 
 def command_new_topic(name):
+    check_have_wad()
     new_topic(name)
 
 
@@ -686,6 +686,7 @@ class EntryRefSetType(RefSetType):
 
 
 def command_goto(reference):
+    check_have_wad()
     if reference is None:
         raise UsageException('"goto" needs a reference')
     goto(reference)
@@ -732,18 +733,6 @@ def find_matching_command(inp):
     return command_prefix, command_fn
 
 
-class WadError(Exception):
-    pass
-
-
-# TODO: WadError should not include exceptions that arise from failed assertions
-def handle_internal_exception(formatted_tb):
-    print 'Internal error!\n'
-    print formatted_tb
-    print '\nPlease open an issue: https://github.com/edmund-huber/wad/issues/new'
-    raise WadError()
-
-
 def wad_main(arguments):
     # Find the command corresponding to the command line arguments.
     command_prefix, command_fn = find_matching_command(arguments)
@@ -771,19 +760,22 @@ def wad_main(arguments):
             # error.
             raise UsageException('too many arguments.')
         command_fn(*command_args)
-    except InternalException as e:
-        handle_internal_exception(traceback.format_exc())
     except UsageException as e:
         msg = str(e)
         if msg == '':
-            handle_internal_exception(traceback.format_exc())
+            raise InternalException('bad UsageException')
         else:
             print 'Usage error: {}'.format(msg)
-            raise WadError()
+            raise
 
 
 if __name__ == '__main__':
     try:
         wad_main(sys.argv[1:])
-    except WadError:
+    except UsageException:
+        sys.exit(1)
+    except Exception as e:
+        print 'Internal error!\n'
+        print traceback.format_exc()
+        print 'Please open an issue: https://github.com/edmund-huber/wad/issues/new'
         sys.exit(1)

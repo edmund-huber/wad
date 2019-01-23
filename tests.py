@@ -6,7 +6,7 @@ import tempfile
 import traceback
 from unittest import main, TestCase
 
-from wad import command_fns, wad_main, WadError
+from wad import command_fns, wad_main, UsageException
 
 
 class CaptureOutput(object):
@@ -52,19 +52,12 @@ class WadTestCase(TestCase):
 
     def wad(self, *command, **kwargs):
         if kwargs.get('error', False):
-            with self.assertRaises(WadError):
+            with self.assertRaises(UsageException):
                 with CaptureOutput() as output:
                     wad_main(command)
         else:
-            try:
-                with CaptureOutput() as output:
-                    wad_main(command)
-            except WadError:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                self.fail('did not expect WadError:\n%soutput was:\n%s' % (''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)), output.get_stdout()))
-            except Exception as e:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                self.fail('wad should only raise WadError, but this happened:\n%s' % ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+            with CaptureOutput() as output:
+                wad_main(command)
         self.wad_output = output.get_stdout()
         # TODO this is probably not always right:
         self.assertEqual(output.get_stderr(), '')
