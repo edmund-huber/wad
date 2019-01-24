@@ -818,7 +818,7 @@ command_fns = (
     # TODO: this needs to handle 'blah blah' as well as it supports '"blah blah"'
     (('goto',), command_goto, 'Switch to a different topic'),
     (('restack',), command_restack, 'Change the parent of the given commit to a different commit'),
-    (('reset',), command_reset, 'Undoes the changes from the last commit')
+    (('reset',), command_reset, 'Undo the changes from the last commit')
     # TODO: ^ not sure i get it.
 )
 # TODO: 'commits' should show committer, date, description, files new/changed/moved/deleted
