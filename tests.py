@@ -137,6 +137,7 @@ class TestWadStatus(WadTestCase):
         # TODO: move that file
         self.wad('status')
         self.assertTrue(self.wad_output.endswith(
+            'latest commit: changed stuff\n'
             'remove (1)\n'
             '    ./deleted_file\n'
             'add (1)\n'
@@ -197,6 +198,7 @@ class TestWadGoto(WadTestCase):
             f.write('a')
         self.wad('status')
         self.assertTrue(self.wad_output.endswith(
+            'latest commit: wad up\n'
             'add (1)\n'
             '    ./a\n'
         ))
@@ -207,6 +209,36 @@ class TestWadGoto(WadTestCase):
         self.assertFalse(os.path.isfile('a'))
         self.wad('goto', 'test')
         self.assertTrue(os.path.isfile('a'))
+
+
+class TestWadReset(WadTestCase):
+    def test(self):
+        self.wad('up')
+        with open('a', 'w') as f:
+            f.write('a')
+        self.wad('new', 'commit', 'test')
+        self.wad('new', 'topic', 'test')
+        with open('b', 'w') as f:
+            f.write('b')
+        self.wad('new', 'commit', 'test again')
+        os.unlink('a')
+        with open('b', 'w') as f:
+            f.write('b2')
+        with open('c', 'w') as f:
+            f.write('c')
+        self.wad('status')
+        self.assertTrue(self.wad_output.endswith(
+            'latest commit: test again\n'
+            'remove (1)\n'
+            '    ./a\n'
+            'add (1)\n'
+            '    ./c\n'
+            'change (1)\n'
+            '    ./b\n'
+        ))
+        self.wad('reset')
+        self.wad('status')
+        self.assertTrue(self.wad_output.endswith('No changes.\n'))
 
 
 if __name__ == '__main__':

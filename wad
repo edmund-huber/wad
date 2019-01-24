@@ -785,6 +785,7 @@ def command_reset():
     Undo all changes.
     """
     check_have_wad()
+    goto(CurrentTopic(None).get('the.topic_ref').get_reference())
 
 
 command_fns = (
