@@ -120,31 +120,56 @@ class TestWadStatus(WadTestCase):
         self.wad('status')
         self.assertRegexpMatches(self.wad_output, r'No changes.$')
         # But if there are changes, they will show up in status.
-        with open('untouched_file', 'w') as f:
-            f.write('a')
-        with open('changed_file', 'w') as f:
-            f.write('a')
-        with open('deleted_file', 'w') as f:
-            f.write('a')
-        with open('moved_file', 'w') as f:
-            f.write('123456789')
-        self.wad('new', 'commit', 'changed stuff')
-        with open('new_file', 'w') as f:
-            f.write('a')
-        with open('changed_file', 'w') as f:
-            f.write('b')
-        os.unlink('deleted_file')
-        # TODO: move that file
+        os.mkdir('a')
+        os.mkdir('a/b')
+        with open('a/b/1', 'w') as f:
+            f.write('1')
+        with open('a/b/2', 'w') as f:
+            f.write('2')
+        with open('a/3', 'w') as f:
+            f.write('3')
+        with open('4', 'w') as f:
+            f.write('4')
+        os.mkdir('c')
         self.wad('status')
-        self.assertTrue(self.wad_output.endswith(
-            'latest commit: changed stuff\n'
-            'remove (1)\n'
-            '    ./deleted_file\n'
-            'add (1)\n'
-            '    ./new_file\n'
-            'change (1)\n'
-            '    ./changed_file\n'
-        ))
+        self.assertEqual(self.wad_output,
+            'topic/main "TODO - new topic"\n'
+            'latest commit: wad up\n'
+            '+ d   ./a\n'
+            '+ f       3\n'
+            '+ d       b\n'
+            '+ f         1\n'
+            '+ f         2\n'
+            '+ d     c\n'
+            '+ f     4\n'
+        )
+        # When we commit, there are no changes to show anymore.
+        self.wad('new', 'commit', 'test')
+        self.wad('status')
+        self.assertRegexpMatches(self.wad_output, r'o changes.$')
+        # Make some more changes show up.
+        shutil.rmtree('a/b')
+        with open('a/3', 'w') as f:
+            f.write('aaa')
+        with open('c/5', 'w') as f:
+            f.write('5')
+        with open('c/6', 'w') as f:
+            f.write('6')
+        self.wad('status')
+        self.assertEqual(self.wad_output,
+            'topic/main "TODO - new topic"\n'
+            'latest commit: test\n'
+            '~ f   ./a/3\n'
+            '- d       b\n'
+            '- f         1\n'
+            '- f         2\n'
+            '+ f     c/5\n'
+            '+ f       6\n'
+        )
+        # Once again, they go away after a commit.
+        self.wad('new', 'commit', 'changed stuff')
+        self.wad('status')
+        self.assertRegexpMatches(self.wad_output, r'No changes.$')
 
 
 class TestWadTopics(WadTestCase):
@@ -197,14 +222,14 @@ class TestWadGoto(WadTestCase):
         with open('a', 'w') as f:
             f.write('a')
         self.wad('status')
-        self.assertTrue(self.wad_output.endswith(
+        self.assertEqual(self.wad_output,
+            'topic/test "TODO - new topic"\n'
             'latest commit: wad up\n'
-            'add (1)\n'
-            '    ./a\n'
-        ))
+            '+ f   ./a\n'
+        )
         self.wad('new', 'commit', 'test')
         self.wad('status')
-        self.assertTrue(self.wad_output.endswith('No changes.\n'))
+        self.assertRegexpMatches(self.wad_output, r'No changes.$')
         self.wad('goto', 'main')
         self.assertFalse(os.path.isfile('a'))
         self.wad('goto', 'test')
@@ -227,18 +252,16 @@ class TestWadReset(WadTestCase):
         with open('c', 'w') as f:
             f.write('c')
         self.wad('status')
-        self.assertTrue(self.wad_output.endswith(
+        self.assertEqual(self.wad_output,
+            'topic/test "TODO - new topic"\n'
             'latest commit: test again\n'
-            'remove (1)\n'
-            '    ./a\n'
-            'add (1)\n'
-            '    ./c\n'
-            'change (1)\n'
-            '    ./b\n'
-        ))
+            '- f   ./a\n'
+            '+ f     c\n'
+            '~ f     b\n'
+        )
         self.wad('reset')
         self.wad('status')
-        self.assertTrue(self.wad_output.endswith('No changes.\n'))
+        self.assertRegexpMatches(self.wad_output, r'No changes.$')
 
 
 if __name__ == '__main__':

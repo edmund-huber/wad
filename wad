@@ -435,11 +435,11 @@ def collect_status(path_and_type, entry_and_type):
     path, path_type = path_and_type
     entry, entry_type = entry_and_type
     if path_type is None and entry_type is not None:
-        return 'remove', path
+        return 'remove', path, entry_type
     elif path_type is not None and entry_type is None:
-        return 'add', path
+        return 'add', path, path_type
     elif path_type != entry_type:
-        return 'change', path
+        return 'change', path, path_type
     elif path_type == 'f' and entry_type == 'f':
         # check permissions
         # check sha
@@ -449,7 +449,7 @@ def collect_status(path_and_type, entry_and_type):
             contents_lines = entry.get('contents.file').split('\n')
             path_lines = [line.rstrip('\n') for line in open(path).readlines()]
             diff = difflib.context_diff(contents_lines, path_lines)
-            return 'change', path
+            return 'change', path, path_type
     elif path_type == 'd' and entry_type == 'd':
         # For completeness.
         # TODO: check permissions.
@@ -457,6 +457,15 @@ def collect_status(path_and_type, entry_and_type):
     else:
         raise UnreachableException()
 
+
+def path_split(path):
+    parts = []
+    while True:
+        path, part = os.path.split(path)
+        parts.insert(0, part)
+        if path == '':
+            break
+    return parts
 
 def command_status():
     """wad status
@@ -468,15 +477,25 @@ def command_status():
     print '{} "{}"'.format(current_topic.get_reference(), current_topic.get('description.str'))
     tip = current_topic.get('tip.commit_ref')
     print 'latest commit: {}'.format(tip.get('description.str'))
-    grouped_changes = collections.defaultdict(list)
-    for verb, path in walk_repo_and_tree(collect_status):
-        grouped_changes[verb].append(path)
-    for ty in ['remove', 'add', 'change']:
-        if grouped_changes[ty]:
-            print '%s (%i)' % (ty, len(grouped_changes[ty]))
-            for path in grouped_changes[ty]:
-                print '    %s' % path
-    if not any(grouped_changes.values()):
+    previous_parts = []
+    have_changes = False
+    for verb, path, ty in walk_repo_and_tree(collect_status):
+        have_changes = True
+        common = []
+        parts = path_split(path)
+        for prev, part in zip(previous_parts, parts):
+            if prev == part:
+                common.append(part)
+        short_verb = {
+            'add': '+',
+            'remove': '-',
+            'change': '~'
+        }[verb]
+        print '%s %s ' % (short_verb, ty),
+        print '  ' * len(common),
+        print os.path.join(*parts[len(common):])
+        previous_parts = parts
+    if not have_changes:
         print 'No changes.'
 
 
@@ -529,6 +548,11 @@ def _walk_repo_and_tree_inner(path, entry, fn):
     else:
         raise UnreachableException()
 
+    # Pass the (path, entry) pair to 'fn'.
+    value = fn((path, path_type), (entry, entry_type))
+    if value is not None:
+        yield value
+
     # Recurse down if the path is a directory in either the tree or repo.
     if path_type == 'd':
         in_tree = set(os.listdir(path))
@@ -541,11 +565,6 @@ def _walk_repo_and_tree_inner(path, entry, fn):
     for name in in_tree | set(in_repo.keys()):
         for value in _walk_repo_and_tree_inner(os.path.join(path, name), in_repo.get(name), fn):
             yield value
-
-    # Pass the (path, entry) pair to 'fn'.
-    value = fn((path, path_type), (entry, entry_type))
-    if value is not None:
-        yield value
 
 
 def command_topics():
