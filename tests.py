@@ -137,11 +137,11 @@ class TestWadStatus(WadTestCase):
         # TODO: move that file
         self.wad('status')
         self.assertTrue(self.wad_output.endswith(
-            'delete (1)\n'
+            'remove (1)\n'
             '    ./deleted_file\n'
-            'create (1)\n'
+            'add (1)\n'
             '    ./new_file\n'
-            'modify (1)\n'
+            'change (1)\n'
             '    ./changed_file\n'
         ))
 
@@ -187,6 +187,26 @@ class TestWadNewTopic(WadTestCase):
         with open('new_file', 'w') as f:
             f.write('a')
         self.wad('new', 'topic', 'test', error=True)
+
+
+class TestWadGoto(WadTestCase):
+    def test(self):
+        self.wad('up')
+        self.wad('new', 'topic', 'test')
+        with open('a', 'w') as f:
+            f.write('a')
+        self.wad('status')
+        self.assertTrue(self.wad_output.endswith(
+            'add (1)\n'
+            '    ./a\n'
+        ))
+        self.wad('new', 'commit', 'test')
+        self.wad('status')
+        self.assertTrue(self.wad_output.endswith('No changes.\n'))
+        self.wad('goto', 'main')
+        self.assertFalse(os.path.isfile('a'))
+        self.wad('goto', 'test')
+        self.assertTrue(os.path.isfile('a'))
 
 
 if __name__ == '__main__':

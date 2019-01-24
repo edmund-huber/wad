@@ -56,6 +56,45 @@ def command_help(*args):
         print command_fn.__doc__
 
 
+def make_tree_match_repo(path_and_type, entry_and_type):
+    path, path_type = path_and_type
+    entry, entry_type = entry_and_type
+    def create_path_from_entry():
+        if entry_type == 'f':
+            # TODO this is silly. We should be able to do a shutil.copy()
+            # instead of reading in the whole file, and writing all the bytes
+            # out again.
+            with open(path, 'w') as f:
+                f.write(entry.get('contents.file'))
+        elif entry_type == 'd':
+            os.mkdir(path)
+        else:
+            raise UnreachableException()
+        # TODO permissions
+    def delete_path():
+        if path_type == 'f':
+            os.remove(path)
+        elif path_type == 'd':
+            os.rmdir(path)
+        else:
+            raise UnreachableException()
+    if path_type is None and entry_type is not None:
+        create_path_from_entry()
+    elif path_type is not None and entry_type is None:
+        delete_path()
+    elif path_type != entry_type:
+        delete_path()
+        create_path_from_entry()
+    elif path_type == 'f' and entry_type == 'f':
+        create_path_from_entry()
+    elif path_type == 'd' and entry_type == 'd':
+        # For completeness.
+        # TODO: check permissions.
+        pass
+    else:
+        raise UnreachableException()
+
+
 def goto(topic_reference):
     # The topic must exist.
     topic = Topic(topic_reference)
@@ -65,6 +104,9 @@ def goto(topic_reference):
     current_topic = CurrentTopic(None)
     current_topic.set('the.topic_ref', topic)
     current_topic.store()
+    # Make the tree match the repo.
+    for _ in walk_repo_and_tree(make_tree_match_repo):
+        pass
 
 
 class WadObjectTypeRegistry(type):
@@ -311,7 +353,6 @@ class WadObject(object):
         self._stage_dir_and_flock = None
 
 
-# replace remaining uses of relative_dirpath with this
 def unroot_path(path, root):
     dirname = os.path.dirname(path)
     relative_dirname = os.path.relpath(dirname, root)
@@ -390,13 +431,31 @@ def check_have_wad():
         raise UsageException('directory {} is not a wad. Try `wad up`.'.format(os.path.abspath('.')))
 
 
-def get_changes():
-    current_topic = CurrentTopic(None).get('the.topic_ref')
-    tip = current_topic.get('tip.commit_ref')
-    root_entry = tip.get('root.entry_ref')
-    if root_entry.get('name.str') != '.':
-        raise InternalException()
-    return diff_repo_to_current('.', root_entry)
+def collect_status(path_and_type, entry_and_type):
+    path, path_type = path_and_type
+    entry, entry_type = entry_and_type
+    if path_type is None and entry_type is not None:
+        return 'remove', path
+    elif path_type is not None and entry_type is None:
+        return 'add', path
+    elif path_type != entry_type:
+        return 'change', path
+    elif path_type == 'f' and entry_type == 'f':
+        # check permissions
+        # check sha
+        # sha differ? do diff
+        # and what if file is huge
+        if calculate_file_hash(path) != entry.get('contents_file_hash.str'):
+            contents_lines = entry.get('contents.file').split('\n')
+            path_lines = [line.rstrip('\n') for line in open(path).readlines()]
+            diff = difflib.context_diff(contents_lines, path_lines)
+            return 'change', path
+    elif path_type == 'd' and entry_type == 'd':
+        # For completeness.
+        # TODO: check permissions.
+        pass
+    else:
+        raise UnreachableException()
 
 
 def command_status():
@@ -410,12 +469,12 @@ def command_status():
     tip = current_topic.get('tip.commit_ref')
     print 'latest commit: {}'.format(tip.get('description.str'))
     grouped_changes = collections.defaultdict(list)
-    for verb, path, context in get_changes():
+    for verb, path in walk_repo_and_tree(collect_status):
         grouped_changes[verb].append(path)
-    for verb in ['delete', 'create', 'replace', 'modify']:
-        if grouped_changes[verb]:
-            print '%s (%i)' % (verb, len(grouped_changes[verb]))
-            for path in grouped_changes[verb]:
+    for ty in ['remove', 'add', 'change']:
+        if grouped_changes[ty]:
+            print '%s (%i)' % (ty, len(grouped_changes[ty]))
+            for path in grouped_changes[ty]:
                 print '    %s' % path
     if not any(grouped_changes.values()):
         print 'No changes.'
@@ -439,10 +498,20 @@ def command_commits():
             break
 
 
-def diff_repo_to_current(path, entry):
+def walk_repo_and_tree(fn):
+    current_topic = CurrentTopic(None).get('the.topic_ref')
+    tip = current_topic.get('tip.commit_ref')
+    root_entry = tip.get('root.entry_ref')
+    if root_entry.get('name.str') != '.':
+        raise InternalException()
+    return _walk_repo_and_tree_inner('.', root_entry, fn)
+
+
+def _walk_repo_and_tree_inner(path, entry, fn):
     if path == './.wad':
         return
 
+    # Figure out the file type of the path in tree and in repo.
     if not os.path.exists(path):
         path_type = None
     elif os.path.isfile(path):
@@ -451,7 +520,6 @@ def diff_repo_to_current(path, entry):
         path_type = 'd'
     else:
         raise UnreachableException()
-
     if entry is None:
         entry_type = None
     elif entry.get('contents.file') is not None:
@@ -461,44 +529,29 @@ def diff_repo_to_current(path, entry):
     else:
         raise UnreachableException()
 
+    # Recurse down if the path is a directory in either the tree or repo.
     if path_type == 'd':
-        on_disk = set(os.listdir(path))
+        in_tree = set(os.listdir(path))
     else:
-        on_disk = set()
+        in_tree = set()
     if entry_type == 'd':
         in_repo = {entry.get('name.str'): entry for entry in entry.get('contents.entry_ref_set')}
     else:
         in_repo = {}
-    for name in on_disk | set(in_repo.keys()):
-        for value in diff_repo_to_current(os.path.join(path, name), in_repo.get(name)):
+    for name in in_tree | set(in_repo.keys()):
+        for value in _walk_repo_and_tree_inner(os.path.join(path, name), in_repo.get(name), fn):
             yield value
 
-    if path_type is None and entry_type is not None:
-        yield ('delete', path, None)
-    elif path_type is not None and entry_type is None:
-        yield ('create', path, None)
-    elif path_type != entry_type:
-        yield ('replace', path, None)
-    elif path_type == 'f' and entry_type == 'f':
-        # check permissions
-        # check sha
-        # sha differ? do diff
-        # and what if file is huge
-        if calculate_file_hash(path) != entry.get('contents_file_hash.str'):
-            contents_lines = entry.get('contents.file').split('\n')
-            path_lines = [line.rstrip('\n') for line in open(path).readlines()]
-            diff = difflib.context_diff(contents_lines, path_lines)
-            yield ('modify', path, ''.join(diff))
-    elif path_type == 'd' and entry_type == 'd':
-        # check permissions
-        # yield ('check', path)
-        pass
-    else:
-        raise UnreachableException()
+    # Pass the (path, entry) pair to 'fn'.
+    value = fn((path, path_type), (entry, entry_type))
+    if value is not None:
+        yield value
 
 
 def command_topics():
-    """
+    """wad topics
+
+    List all topics, and highlight the current topic.
     """
     check_have_wad()
     current_topic = CurrentTopic(None).get('the.topic_ref')
@@ -517,7 +570,7 @@ def command_new_topic(name):
     """
     check_have_wad()
     try:
-        get_changes().next()
+        walk_repo_and_tree(collect_status).next()
         raise UsageException('There are changes, you must commit or reset first.')
     except StopIteration:
         pass
@@ -554,6 +607,7 @@ class Commit(WadObject):
     _optional_attributes = {'parent.commit_ref'}
     _reference_type = ReferenceType.CONTENTS_HASH
 
+    # TODO: this can be replaced with a walk()
     def register_path(self, path):
         root = self._register_sub_path('.')
         self.set('root.entry_ref', root)
