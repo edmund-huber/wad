@@ -603,7 +603,7 @@ def command_new_commit(description):
     """
     check_have_wad()
     if description is None:
-        raise InternalException()
+        raise UsageException('"commit" needs a description')
     # Make a new commit, as a child of the tip of the topic.
     current_topic = CurrentTopic(None).get('the.topic_ref')
     tip = current_topic.get('tip.commit_ref')
