@@ -317,8 +317,10 @@ class WadObject(object):
     def store(self):
         # If there aren't staged changes, then there's nothing to do.
         if self._stage_dir_and_flock is None:
+            # TODO; this is a programming error right?
             return
         # Get rid of the flock.
+        # TODO maybe should not do this until we are done
         stage_dir, flock = self._stage_dir_and_flock
         flock.close()
         os.remove(os.path.join(stage_dir, 'lock'))
